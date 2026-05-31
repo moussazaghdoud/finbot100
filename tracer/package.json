@@ -1,0 +1,20 @@
+{
+  "name": "finbot100-tracer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "FinBot 100 tracer-bullet: data -> AI council debate -> falsifiable predictions -> auto-grade -> calibration scoreboard. One asset (BTC), two agents (ORACLE + ATLAS).",
+  "scripts": {
+    "debate": "node src/commands/debate.js",
+    "seed": "node src/commands/seed.js",
+    "grade": "node src/commands/grade.js",
+    "board": "node src/commands/board.js",
+    "demo": "node src/commands/demo.js"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "^0.39.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

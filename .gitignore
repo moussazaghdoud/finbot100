@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# secrets
+.env
+**/.env
+
+# runtime data (ephemeral; reseeded on boot)
+app/data/predictions.json
+app/data/user.json
+tracer/data/predictions.json
+
+# temp / artifacts
+**/_shot*.png
+**/_edge_err.txt

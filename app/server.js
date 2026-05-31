@@ -1,0 +1,165 @@
+// FinBot 100 — zero-dependency HTTP server: static frontend + JSON API.
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, extname, normalize } from 'node:path';
+import { CONFIG } from './src/config.js';
+import { AGENTS, COUNCIL_ORDER } from './src/agents/registry.js';
+import { llmMode } from './src/agents/llm.js';
+import { runDebate } from './src/core/debate.js';
+import { getUniverse } from './src/core/universe.js';
+import { seedHistoryIfEmpty } from './src/core/seed.js';
+import { gradeDue } from './src/ledger/grade.js';
+import { scoreboard } from './src/ledger/calibration.js';
+import {
+  loadPredictions,
+  makePrediction,
+  appendPredictions,
+  loadUser,
+  saveUser,
+} from './src/ledger/store.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PUBLIC = join(__dirname, 'public');
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+
+function send(res, code, data, type = 'application/json') {
+  const body = type === 'application/json' ? JSON.stringify(data) : data;
+  res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' });
+  res.end(body);
+}
+function readBody(req) {
+  return new Promise((resolve) => {
+    let b = '';
+    req.on('data', (c) => (b += c));
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(b || '{}'));
+      } catch {
+        resolve({});
+      }
+    });
+  });
+}
+
+async function serveStatic(req, res) {
+  let p = req.url.split('?')[0];
+  if (p === '/') p = '/index.html';
+  const full = normalize(join(PUBLIC, p));
+  if (!full.startsWith(PUBLIC)) return send(res, 403, 'forbidden', 'text/plain');
+  try {
+    const data = await readFile(full);
+    send(res, 200, data, MIME[extname(full)] || 'application/octet-stream');
+  } catch {
+    send(res, 404, 'not found', 'text/plain');
+  }
+}
+
+async function api(req, res, url) {
+  const path = url.pathname;
+  try {
+    if (path === '/api/config') {
+      return send(res, 200, {
+        llmMode: llmMode(),
+        horizonDays: CONFIG.horizonDays,
+        startingCapital: CONFIG.startingCapital,
+        universe: CONFIG.universe,
+        agents: AGENTS,
+        councilOrder: COUNCIL_ORDER,
+      });
+    }
+    if (path === '/api/universe') return send(res, 200, await getUniverse());
+    if (path === '/api/debate') {
+      const asset = url.searchParams.get('asset') || 'BTC';
+      return send(res, 200, await runDebate(asset));
+    }
+    if (path === '/api/ledger') {
+      await gradeDue();
+      const preds = loadPredictions();
+      const recent = preds
+        .filter((p) => p.resolved)
+        .sort((a, b) => b.resolveAt - a.resolveAt)
+        .slice(0, 12);
+      return send(res, 200, {
+        board: scoreboard(preds),
+        pending: preds.filter((p) => !p.resolved).length,
+        resolved: preds.filter((p) => p.resolved).length,
+        recent,
+      });
+    }
+    if (path === '/api/me') {
+      await gradeDue();
+      const preds = loadPredictions();
+      const mine = preds.filter((p) => p.agent === 'YOU');
+      const board = scoreboard(preds).filter((b) => b.agent === 'YOU')[0] || null;
+      const user = loadUser();
+      return send(res, 200, {
+        you: board,
+        capital: user.capital,
+        conviction: user.conviction,
+        pending: mine.filter((p) => !p.resolved).length,
+        history: mine.sort((a, b) => b.createdAt - a.createdAt).slice(0, 10),
+      });
+    }
+    if (path === '/api/predict' && req.method === 'POST') {
+      const { asset, stance, confidence } = await readBody(req);
+      if (!asset || !['bullish', 'bearish', 'neutral'].includes(stance))
+        return send(res, 400, { error: 'asset and valid stance required' });
+      const brief = await runDebate(asset); // ensures price + agent calls exist
+      const conf = Math.max(50, Math.min(90, Number(confidence) || 60));
+      const pred = makePrediction(
+        { agent: 'YOU', stance, confidence: conf, thesis: 'Your call', horizonDays: CONFIG.horizonDays },
+        asset,
+        brief.price,
+        'user'
+      );
+      appendPredictions([pred]);
+      // allocate a slice of conviction capital toward your active call
+      const user = loadUser();
+      user.conviction[asset] = (user.conviction[asset] || 0) + 10;
+      saveUser(user);
+      return send(res, 200, { ok: true, prediction: pred, council: brief.theses, moderator: brief.moderator });
+    }
+    if (path === '/api/grade' && req.method === 'POST') {
+      const n = await gradeDue();
+      return send(res, 200, { graded: n });
+    }
+    return send(res, 404, { error: 'unknown endpoint' });
+  } catch (e) {
+    return send(res, 500, { error: e.message });
+  }
+}
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  if (url.pathname.startsWith('/api/')) return api(req, res, url);
+  return serveStatic(req, res);
+});
+
+async function warmup() {
+  // Backfill + grade the ledger in the background so the health check (and the
+  // UI) come up immediately even on a cold Railway deploy.
+  try {
+    const n = await seedHistoryIfEmpty();
+    if (n) console.log(`  Seeded ${n} historical agent calls.`);
+    const g = await gradeDue();
+    if (g) console.log(`  Graded ${g} due predictions.`);
+  } catch (e) {
+    console.warn(`  (background seed/grade skipped: ${e.message})`);
+  }
+}
+
+function start() {
+  console.log('FinBot 100 — starting…');
+  console.log(`  Reasoning engine: ${llmMode()}`);
+  server.on('error', (e) => {
+    console.error(`  Server error: ${e.code === 'EADDRINUSE' ? `port ${CONFIG.port} is already in use — set PORT to a free port` : e.message}`);
+    process.exit(1);
+  });
+  server.listen(CONFIG.port, CONFIG.host, () => {
+    const shown = CONFIG.host === '0.0.0.0' ? '127.0.0.1' : CONFIG.host;
+    console.log(`\n  ▶  FinBot 100 running at http://${shown}:${CONFIG.port}\n`);
+    warmup();
+  });
+}
+start();

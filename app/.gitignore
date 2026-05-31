@@ -1,0 +1,6 @@
+node_modules/
+.env
+data/predictions.json
+data/user.json
+_shot*.png
+_edge_err.txt

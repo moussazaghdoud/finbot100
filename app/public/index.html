@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FinBot 100 — Financial Intelligence</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo"></div>
+      <div>
+        <h1>FINBOT 100</h1>
+        <div class="sub">Financial Intelligence</div>
+      </div>
+    </div>
+    <nav>
+      <button data-view="universe" class="active">◐ Universe</button>
+      <button data-view="council">⟁ Council</button>
+      <button data-view="ledger">⚖ Ledger</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="badge">Conviction: <span class="capital" id="capital">€100</span></div>
+    <div class="badge" id="llm-badge">engine …</div>
+  </header>
+
+  <main>
+    <!-- UNIVERSE -->
+    <section class="view active" id="universe">
+      <canvas id="map"></canvas>
+      <div class="map-hint">Click a star to convene the Council · drag to pan · scroll to zoom</div>
+      <div class="regime-chip" id="regime-chip">macro …</div>
+      <div class="map-legend">
+        <h3>The Living Market</h3>
+        <div class="row"><span class="dot" style="background:#34d399"></span> up over 7 days</div>
+        <div class="row"><span class="dot" style="background:#fb7185"></span> down over 7 days</div>
+        <div class="row"><span class="dot" style="background:#7c5cff"></span> link = correlation</div>
+        <div class="row">size / glow = recent activity</div>
+      </div>
+    </section>
+
+    <!-- COUNCIL -->
+    <section class="view" id="council">
+      <div class="pad" id="council-body">
+        <div class="loading">Select an asset from the Universe to convene the Analyst Council.</div>
+      </div>
+    </section>
+
+    <!-- LEDGER -->
+    <section class="view" id="ledger">
+      <div class="pad" id="ledger-body">
+        <div class="loading">Loading the Accountability Ledger…</div>
+      </div>
+    </section>
+  </main>
+
+  <div id="tooltip"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
