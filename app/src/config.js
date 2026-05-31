@@ -15,8 +15,15 @@ export const CONFIG = {
 
   // The investable universe (educational simulation).
   universe: [
+    // Crypto — Binance/CoinGecko, keyless, works from anywhere (incl. cloud).
     { id: 'BTC', name: 'Bitcoin', kind: 'crypto', sector: 'Crypto', country: 'Global' },
     { id: 'ETH', name: 'Ethereum', kind: 'crypto', sector: 'Crypto', country: 'Global' },
+    { id: 'SOL', name: 'Solana', kind: 'crypto', sector: 'Crypto', country: 'Global' },
+    { id: 'BNB', name: 'BNB', kind: 'crypto', sector: 'Crypto', country: 'Global' },
+    { id: 'XRP', name: 'XRP', kind: 'crypto', sector: 'Crypto', country: 'Global' },
+    { id: 'DOGE', name: 'Dogecoin', kind: 'crypto', sector: 'Crypto', country: 'Global' },
+    { id: 'ADA', name: 'Cardano', kind: 'crypto', sector: 'Crypto', country: 'Global' },
+    // Stocks / ETFs — need STOCK_API_KEY on cloud hosts (see DEPLOY.md).
     { id: 'NVDA', name: 'NVIDIA', kind: 'stock', sector: 'Semiconductors', country: 'US' },
     { id: 'AAPL', name: 'Apple', kind: 'stock', sector: 'Technology', country: 'US' },
     { id: 'MSFT', name: 'Microsoft', kind: 'stock', sector: 'Technology', country: 'US' },
@@ -24,6 +31,10 @@ export const CONFIG = {
     { id: 'SPY', name: 'S&P 500 ETF', kind: 'stock', sector: 'Broad Market', country: 'US' },
     { id: 'GLD', name: 'Gold ETF', kind: 'stock', sector: 'Commodities', country: 'Global' },
   ],
+
+  // Stock data provider key (Twelve Data free tier works from cloud hosts).
+  // Without it, the app falls back to Yahoo (fine locally, blocked on cloud).
+  stockApiKey: process.env.STOCK_API_KEY || process.env.TWELVEDATA_API_KEY || '',
 
   horizonDays: 3,
   bullBand: 0.5,

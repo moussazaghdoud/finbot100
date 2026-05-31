@@ -14,7 +14,11 @@ server binds `0.0.0.0`, and `/api/config` is the health check).
    - (Build/Start are auto-detected via `package.json` + `railway.json`.)
 4. **Variables** tab → add:
    - `ANTHROPIC_API_KEY = sk-ant-…`  ← this turns the six analysts from MOCK into real Claude
-   - *(optional)* `ANTHROPIC_MODEL = claude-sonnet-4-6`
+   - `STOCK_API_KEY = …`  ← free Twelve Data key so stocks/ETFs load on the cloud
+     (Yahoo Finance blocks datacenter IPs; crypto via Binance always works). Get a
+     free key at https://twelvedata.com → sign up → API Keys. Free tier: ~800
+     requests/day, plenty for this app (data is cached 15 min and shared).
+   - *(optional)* `ANTHROPIC_MODEL = claude-sonnet-4-6` (or `claude-haiku-4-5-20251001` to cut cost)
 5. **Settings → Networking → Generate Domain** to get a public URL.
 6. Done. The header badge will show `engine: Claude (…)` once the key is set.
 

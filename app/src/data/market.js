@@ -1,6 +1,6 @@
 // Unified market data: crypto via Binance/CoinGecko (keyless), stocks/ETFs via
 // Stooq CSV (keyless). Returns a daily-close series per asset. All real data.
-import { assetById } from '../config.js';
+import { CONFIG, assetById } from '../config.js';
 
 const DAY_MS = 86400000;
 const cache = new Map(); // id -> { series, source, ts }
@@ -15,7 +15,10 @@ async function binanceDaily(symbol, limit = 41) {
 }
 
 async function coingeckoDaily(id, days = 40) {
-  const map = { BTC: 'bitcoin', ETH: 'ethereum' };
+  const map = {
+    BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', BNB: 'binancecoin',
+    XRP: 'ripple', DOGE: 'dogecoin', ADA: 'cardano',
+  };
   const url = `https://api.coingecko.com/api/v3/coins/${map[id]}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
   const r = await fetch(url);
   if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
@@ -37,6 +40,33 @@ async function yahooDaily(symbol) {
   return rows.slice(-41);
 }
 
+async function twelveDataDaily(symbol, key) {
+  const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1day&outputsize=45&apikey=${key}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`TwelveData ${r.status}`);
+  const j = await r.json();
+  if (j.status === 'error' || !Array.isArray(j.values)) throw new Error(`TwelveData: ${j.message || 'no data'}`);
+  // values are newest-first — reverse to oldest-first
+  return j.values
+    .map((v) => ({ t: new Date(v.datetime).getTime(), close: +v.close, high: +v.high, low: +v.low }))
+    .filter((x) => Number.isFinite(x.close))
+    .reverse()
+    .slice(-41);
+}
+
+// Stocks/ETFs: prefer Twelve Data when a key is set (works from cloud),
+// otherwise fall back to Yahoo (works locally, blocked on most cloud hosts).
+async function stockDaily(id) {
+  if (CONFIG.stockApiKey) {
+    try {
+      return await twelveDataDaily(id, CONFIG.stockApiKey);
+    } catch (e) {
+      // fall through to Yahoo as a backup
+    }
+  }
+  return yahooDaily(id);
+}
+
 export async function fetchSeries(id) {
   const cached = cache.get(id);
   if (cached && Date.now() - cached.ts < TTL) return cached;
@@ -52,8 +82,8 @@ export async function fetchSeries(id) {
       source = 'CoinGecko';
     }
   } else {
-    series = await yahooDaily(id);
-    source = 'Yahoo';
+    series = await stockDaily(id);
+    source = CONFIG.stockApiKey ? 'TwelveData' : 'Yahoo';
   }
   if (!series?.length) throw new Error(`No data for ${id}`);
   const out = { series, source, ts: Date.now() };
