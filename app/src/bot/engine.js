@@ -2,7 +2,7 @@
 // analyse every asset → decide → trade the virtual fund → score itself — and
 // writes each step to the activity log so you can watch it think.
 import { CONFIG } from '../config.js';
-import { llmMode } from '../agents/llm.js';
+import { llmMode, llmUsage } from '../agents/llm.js';
 import { getSignals } from '../core/signals.js';
 import { gradeDue } from '../ledger/grade.js';
 import { getSpot, getEurUsd, usMarketOpen } from '../data/market.js';
@@ -30,6 +30,7 @@ export function status() {
     nextRunAt: state.nextRunAt,
     everyMin: CONFIG.signals.everyMin,
     engine: llmMode(),
+    claude: llmUsage(),
     uptimeSec: Math.round((now - bootAt) / 1000),
     lastError: state.lastError,
     now,
@@ -83,10 +84,13 @@ export async function runCycle({ reason = 'scheduled' } = {}) {
     const signals = await getSignals({ onProgress: (i, n, asset) => (state.progress = { i, n, asset, step: 'analysing' }) });
     for (const s of signals) {
       if (s.error) { logEvent('error', `${s.asset}: could not analyse — ${s.error}`, { cycle, asset: s.asset }); continue; }
-      logEvent('analysis', `${s.asset}: ${s.votes.bull}↑ ${s.votes.bear}↓ → ${s.action} (strength ${s.strength})`, {
+      const ai = s.theses.filter((t) => t.via === 'claude').length;
+      logEvent('analysis', `${s.asset}: ${s.votes.bull}↑ ${s.votes.bear}↓ → ${s.action} (strength ${s.strength}) · ${ai ? `${ai}/${s.theses.length} by Claude` : 'rules only'}`, {
         cycle, asset: s.asset, action: s.action, score: s.score, strength: s.strength, price: s.price, votes: s.votes, reason: s.reason, risk: s.risk, theses: s.theses,
       });
     }
+    const u = llmUsage();
+    if (u.enabled && u.failed && !u.ok) logEvent('error', `Claude is NOT being used: every call failed (${u.lastError}). The analysts used their built-in rules this cycle.`, { cycle });
     const counts = ['BUY', 'SELL', 'HOLD'].map((a) => `${signals.filter((s) => s.action === a).length} ${a}`).join(' · ');
 
     state.progress = { i: signals.length, n: signals.length, asset: null, step: 'deciding' };

@@ -11,8 +11,8 @@ let FORCE_MOCK = false;
 export const setForceMock = (v) => (FORCE_MOCK = v);
 
 async function run(agent, system, user, mock) {
-  const raw = (!FORCE_MOCK && (await askClaudeJson(system, user))) || mock;
-  return normalizeThesis(agent, raw);
+  const ai = !FORCE_MOCK && (await askClaudeJson(system, user));
+  return { ...normalizeThesis(agent, ai || mock), via: ai ? 'claude' : 'rules' };
 }
 
 // ── SAGE — macro economist ────────────────────────────────────────────────

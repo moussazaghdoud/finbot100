@@ -8,11 +8,43 @@ async function getClient() {
       try {
         const mod = await import('@anthropic-ai/sdk');
         return new mod.default();
-      } catch {
+      } catch (e) {
+        noteFailure(`SDK failed to load: ${e.message}`);
         return null;
       }
     })();
   return clientPromise;
+}
+
+// Per-day usage so failures and spend are visible (/api/status), plus a hard
+// daily call cap: past it the analysts fall back to their data-driven rules.
+const PRICE = { // $ per 1M tokens (input, output)
+  'claude-sonnet-5-5': [2, 10],
+  'claude-haiku-5-5': [0.1, 0.5],
+  'claude-opus-5-5': [4, 20],
+};
+const usage = { day: '', calls: 0, ok: 0, failed: 0, capped: 0, inTok: 0, outTok: 0, lastError: null, lastErrorAt: null, lastOkAt: null, keyRejected: false };
+function today() {
+  const d = new Date().toISOString().slice(0, 10);
+  if (usage.day !== d) Object.assign(usage, { day: d, calls: 0, ok: 0, failed: 0, capped: 0, inTok: 0, outTok: 0 });
+}
+function noteFailure(msg) {
+  usage.failed++;
+  if (msg !== usage.lastError) console.warn(`  [claude] call failed: ${msg}`); // log each new error once
+  usage.lastError = msg;
+  usage.lastErrorAt = Date.now();
+}
+
+export function llmUsage() {
+  today();
+  const [pi, po] = PRICE[CONFIG.model] || [0, 0];
+  return {
+    ...usage,
+    model: CONFIG.model,
+    enabled: CONFIG.hasKey,
+    cap: CONFIG.maxClaudeCallsPerDay,
+    estCostUsd: +((usage.inTok * pi + usage.outTok * po) / 1e6).toFixed(4),
+  };
 }
 
 function extractJson(t) {
@@ -26,18 +58,45 @@ function extractJson(t) {
   }
 }
 
+// One short JSON answer. Low effort keeps the model's reasoning (billed as
+// output) small; max_tokens leaves room for that reasoning plus the JSON.
 export async function askClaudeJson(system, user) {
   const client = await getClient();
   if (!client) return null;
+  today();
+  // A rejected key won't start working on its own (changing it restarts the
+  // server), so stop calling until then.
+  if (usage.keyRejected) return null;
+  if (usage.calls >= CONFIG.maxClaudeCallsPerDay) {
+    usage.capped++;
+    return null;
+  }
+  usage.calls++;
   try {
     const msg = await client.messages.create({
       model: CONFIG.model,
-      max_tokens: 700,
+      max_tokens: 4000,
+      output_config: { effort: 'low' },
       system,
       messages: [{ role: 'user', content: user }],
     });
-    return extractJson(msg.content.map((c) => (c.type === 'text' ? c.text : '')).join(''));
-  } catch {
+    usage.inTok += msg.usage?.input_tokens || 0;
+    usage.outTok += msg.usage?.output_tokens || 0;
+    if (msg.stop_reason !== 'end_turn') {
+      noteFailure(`stop_reason ${msg.stop_reason}`);
+      return null;
+    }
+    const json = extractJson(msg.content.map((c) => (c.type === 'text' ? c.text : '')).join(''));
+    if (!json) {
+      noteFailure('reply had no JSON');
+      return null;
+    }
+    usage.ok++;
+    usage.lastOkAt = Date.now();
+    return json;
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) usage.keyRejected = true;
+    noteFailure(`${e.status ? e.status + ' ' : ''}${e.error?.error?.message || e.message}${usage.keyRejected ? ' — key rejected, Claude calls stopped until restart' : ''}`);
     return null;
   }
 }

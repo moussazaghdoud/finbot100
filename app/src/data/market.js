@@ -5,13 +5,26 @@ import { CONFIG, assetById } from '../config.js';
 const DAY_MS = 86400000;
 const cache = new Map(); // id -> { series, source, ts }
 const TTL = 15 * 60 * 1000;
+// Binance blocks some cloud regions on api.binance.com; data-api.binance.vision is
+// its public market-data mirror and is reachable from them.
+const BINANCE_HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com'];
+async function binanceGet(path) {
+  let last;
+  for (const h of BINANCE_HOSTS) {
+    try {
+      const r = await fetch(h + path);
+      if (r.ok) return await r.json();
+      last = new Error(`Binance ${r.status}`);
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
 const HISTORY = 100; // daily bars kept: enough to grade calls and backtest ~2 months
 
 async function binanceDaily(symbol, limit = HISTORY) {
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=${limit}`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Binance ${r.status}`);
-  const rows = await r.json();
+  const rows = await binanceGet(`/api/v3/klines?symbol=${symbol}&interval=1d&limit=${limit}`);
   return rows.map((x) => ({ t: x[0], close: +x[4], high: +x[2], low: +x[3] }));
 }
 
@@ -96,8 +109,7 @@ export async function getSpot(id) {
   let p = null;
   try {
     if (meta.kind === 'crypto') {
-      const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${id}USDT`);
-      if (r.ok) p = Number((await r.json()).price) || null;
+      p = Number((await binanceGet(`/api/v3/ticker/price?symbol=${id}USDT`)).price) || null;
     } else {
       p = await stockQuote(id);
     }
@@ -122,8 +134,7 @@ let fxCache = null;
 export async function getEurUsd() {
   if (fxCache && Date.now() - fxCache.ts < SPOT_TTL) return fxCache.rate;
   try {
-    const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT');
-    const rate = Number((await r.json()).price);
+    const rate = Number((await binanceGet('/api/v3/ticker/price?symbol=EURUSDT')).price);
     if (rate > 0.5 && rate < 2) {
       fxCache = { rate, ts: Date.now() };
       return rate;

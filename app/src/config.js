@@ -81,9 +81,13 @@ export const CONFIG = {
 
   model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
   hasKey: Boolean(process.env.ANTHROPIC_API_KEY),
+  // Hard ceiling on Claude calls per UTC day (7 per asset debate). Past it the
+  // analysts fall back to their data-driven rules until midnight UTC.
+  maxClaudeCallsPerDay: Number(process.env.MAX_CLAUDE_CALLS_PER_DAY || 2500),
 
-  // cache debates in-memory for this many minutes (shared across users)
-  debateCacheMin: 30,
+  // Reuse a debate this long (minutes). Matches the bot cycle so page views
+  // between cycles don't trigger (and pay for) extra debates.
+  debateCacheMin: Number(process.env.SIGNALS_EVERY_MIN || 60),
 };
 
 export function assetById(id) {

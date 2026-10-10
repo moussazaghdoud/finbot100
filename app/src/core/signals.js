@@ -39,7 +39,7 @@ function toSignal(brief) {
     votes: { bull: b, bear: r, neutral: brief.theses.length - b - r },
     reason: action === 'SELL' ? m.bearCase : action === 'BUY' ? m.bullCase : m.summary,
     risk: action === 'SELL' ? m.bullCase : m.bearCase,
-    theses: brief.theses.map((t) => ({ agent: t.agent, stance: t.stance, confidence: t.confidence, thesis: t.thesis })),
+    theses: brief.theses.map((t) => ({ agent: t.agent, stance: t.stance, confidence: t.confidence, thesis: t.thesis, via: t.via })),
     ts: brief.ts,
   };
 }
