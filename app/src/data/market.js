@@ -68,36 +68,77 @@ async function stockDaily(id) {
   return yahooDaily(id);
 }
 
-// Live "spot" price for marking the fund to market. Crypto uses Binance's
-// instant ticker (free, updates constantly); stocks reuse the latest daily
-// close (cached) to avoid burning the stock-API quota every tick.
-const spotCache = new Map();
-export async function getSpot(id) {
-  const meta = assetById(id);
-  if (meta.kind === 'crypto') {
+// Live "spot" price (USD) for trading and marking the fund to market.
+// Crypto: Binance instant ticker. Stocks: live quote (Twelve Data if a key is
+// set, else Yahoo's regularMarketPrice). Falls back to the latest daily close.
+const spotCache = new Map(); // id -> { p, ts }
+const SPOT_TTL = 60 * 1000;
+
+async function stockQuote(id) {
+  if (CONFIG.stockApiKey) {
     try {
+      const r = await fetch(`https://api.twelvedata.com/price?symbol=${id}&apikey=${CONFIG.stockApiKey}`);
+      const p = Number((await r.json()).price);
+      if (p > 0) return p;
+    } catch {}
+  }
+  const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${id}?range=1d&interval=1m`, { headers: { 'user-agent': 'Mozilla/5.0 (finbot100)' } });
+  if (!r.ok) throw new Error(`Yahoo ${r.status}`);
+  const p = Number((await r.json())?.chart?.result?.[0]?.meta?.regularMarketPrice);
+  if (!(p > 0)) throw new Error('Yahoo: no quote');
+  return p;
+}
+
+export async function getSpot(id) {
+  const c = spotCache.get(id);
+  if (c && Date.now() - c.ts < SPOT_TTL) return c.p;
+  const meta = assetById(id);
+  let p = null;
+  try {
+    if (meta.kind === 'crypto') {
       const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${id}USDT`);
-      if (r.ok) {
-        const j = await r.json();
-        const p = Number(j.price);
-        if (p > 0) {
-          spotCache.set(id, p);
-          return p;
-        }
-      }
+      if (r.ok) p = Number((await r.json()).price) || null;
+    } else {
+      p = await stockQuote(id);
+    }
+  } catch {
+    /* fall through */
+  }
+  if (!p) {
+    try {
+      const { series } = await fetchSeries(id);
+      p = series[series.length - 1].close;
     } catch {
-      /* fall through */
+      return c?.p ?? null;
     }
   }
-  // stock, or crypto ticker failed: use latest close from the (cached) series
+  spotCache.set(id, { p, ts: Date.now() });
+  return p;
+}
+
+// EUR→USD rate (how many USD one euro buys). Binance EURUSDT tracks EUR/USD
+// closely and is keyless; falls back to the last known rate.
+let fxCache = null;
+export async function getEurUsd() {
+  if (fxCache && Date.now() - fxCache.ts < SPOT_TTL) return fxCache.rate;
   try {
-    const { series } = await fetchSeries(id);
-    const p = series[series.length - 1].close;
-    spotCache.set(id, p);
-    return p;
-  } catch {
-    return spotCache.get(id) ?? null;
-  }
+    const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT');
+    const rate = Number((await r.json()).price);
+    if (rate > 0.5 && rate < 2) {
+      fxCache = { rate, ts: Date.now() };
+      return rate;
+    }
+  } catch {}
+  return fxCache?.rate ?? null;
+}
+
+// Is the US stock market open right now? (Mon–Fri 9:30–16:00 New York time;
+// exchange holidays are not modelled.)
+export function usMarketOpen(now = new Date()) {
+  const ny = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = ny.getDay();
+  const mins = ny.getHours() * 60 + ny.getMinutes();
+  return day >= 1 && day <= 5 && mins >= 570 && mins < 960;
 }
 
 export async function fetchSeries(id) {

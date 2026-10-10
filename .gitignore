@@ -16,3 +16,5 @@ tracer/data/predictions.json
 # temp / artifacts
 **/_shot*.png
 **/_edge_err.txt
+app/data/activity.json
+app/data/fund.legacy-*.json

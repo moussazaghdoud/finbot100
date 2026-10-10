@@ -10,9 +10,9 @@ import { runDebate } from './src/core/debate.js';
 import { getUniverse } from './src/core/universe.js';
 import { seedHistoryIfEmpty } from './src/core/seed.js';
 import { getSignals, trackRecord, recentAlerts } from './src/core/signals.js';
-import { getSpot } from './src/data/market.js';
-import { tick } from './src/fund/trader.js';
-import { loadFund, saveFund, valuation, freshFund } from './src/fund/portfolio.js';
+import { loadFund, saveFund, freshFund } from './src/fund/portfolio.js';
+import { startBot, runCycle, status, fundView, beginChallenge } from './src/bot/engine.js';
+import { getEvents } from './src/bot/activity.js';
 import { gradeDue } from './src/ledger/grade.js';
 import { scoreboard } from './src/ledger/calibration.js';
 import {
@@ -44,28 +44,6 @@ function readBody(req) {
       }
     });
   });
-}
-
-async function fundView() {
-  const fund = loadFund();
-  const prices = {};
-  for (const a of Object.keys(fund.positions)) {
-    if (!fund.positions[a]?.qty) continue;
-    const p = await getSpot(a);
-    if (p) prices[a] = p;
-  }
-  const v = valuation(fund, prices);
-  return {
-    base: fund.base,
-    autoOn: fund.autoOn,
-    autoMin: CONFIG.fund.autoMin,
-    startedAt: fund.startedAt,
-    lastTickAt: fund.lastTickAt,
-    ...v,
-    equity: fund.equity.slice(-200),
-    trades: fund.trades.slice(-40).reverse(),
-    tradeCount: fund.trades.length,
-  };
 }
 
 async function serveStatic(req, res) {
@@ -159,9 +137,19 @@ async function api(req, res, url) {
       return send(res, 200, { graded: n });
     }
     if (path === '/api/fund') return send(res, 200, await fundView());
-    if (path === '/api/fund/tick' && req.method === 'POST') {
-      const r = await tick();
-      return send(res, 200, { ...r, view: await fundView() });
+    if (path === '/api/status') return send(res, 200, status());
+    if (path === '/api/activity') {
+      const since = Number(url.searchParams.get('since') || 0);
+      return send(res, 200, { events: getEvents({ since, limit: Number(url.searchParams.get('limit') || 400) }), status: status() });
+    }
+    if (path === '/api/bot/run' && req.method === 'POST') {
+      runCycle({ reason: 'manual' }); // runs in the background; watch /api/status
+      return send(res, 200, { started: true, status: status() });
+    }
+    if (path === '/api/fund/start' && req.method === 'POST') {
+      if (loadFund().status === 'running') return send(res, 409, { error: 'a challenge is already running' });
+      await beginChallenge();
+      return send(res, 200, { ok: true, view: await fundView() });
     }
     if (path === '/api/fund/auto' && req.method === 'POST') {
       const { on } = await readBody(req);
@@ -171,8 +159,7 @@ async function api(req, res, url) {
       return send(res, 200, { autoOn: fund.autoOn });
     }
     if (path === '/api/fund/reset' && req.method === 'POST') {
-      const f = freshFund();
-      saveFund(f);
+      saveFund(freshFund());
       return send(res, 200, { ok: true, view: await fundView() });
     }
     return send(res, 404, { error: 'unknown endpoint' });
@@ -211,35 +198,8 @@ function start() {
     const shown = CONFIG.host === '0.0.0.0' ? '127.0.0.1' : CONFIG.host;
     console.log(`\n  ▶  FinBot 100 running at http://${shown}:${CONFIG.port}\n`);
     warmup();
-    startAutoTrader();
-    startSignalWatch();
+    startBot();
   });
-}
-
-function startAutoTrader() {
-  const ms = Math.max(2, CONFIG.fund.autoMin) * 60000;
-  console.log(`  Auto-trader: every ${CONFIG.fund.autoMin} min (toggle in the Fund tab).`);
-  const runCycle = async () => {
-    const fund = loadFund();
-    if (!fund.autoOn) return;
-    try {
-      const r = await tick();
-      if (r.trades?.length) console.log(`  Auto-trade: ${r.trades.map((t) => `${t.side} ${t.asset}`).join(', ')}`);
-    } catch (e) {
-      console.warn(`  Auto-trade cycle error: ${e.message}`);
-    }
-  };
-  // First cycle ~8s after boot so the fund deploys and trades are visible early.
-  setTimeout(runCycle, 8000);
-  setInterval(runCycle, ms);
-}
-
-function startSignalWatch() {
-  const ms = Math.max(5, CONFIG.signals.everyMin) * 60000;
-  console.log(`  Signal watch: every ${CONFIG.signals.everyMin} min${CONFIG.signals.ntfyTopic ? ' (+ ntfy push)' : ''}.`);
-  const run = () => getSignals().catch((e) => console.warn(`  Signal watch error: ${e.message}`));
-  setTimeout(run, 20000);
-  setInterval(run, ms);
 }
 
 start();

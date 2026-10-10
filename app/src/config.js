@@ -55,6 +55,7 @@ export const CONFIG = {
   userFile: join(DATA_DIR, 'user.json'),
   fundFile: join(DATA_DIR, 'fund.json'),
   alertsFile: join(DATA_DIR, 'alerts.json'),
+  activityFile: join(DATA_DIR, 'activity.json'),
 
   // BUY / SELL / HOLD thresholds on the Council signal (-1..+1).
   signals: {
@@ -64,16 +65,17 @@ export const CONFIG = {
     ntfyTopic: process.env.NTFY_TOPIC || '', // optional phone push via ntfy.sh
   },
 
-  // The automated paper-trading fund — FinBot trades a virtual €1000 itself.
+  // The paper-trading challenge — FinBot invests a virtual €1000 by itself for
+  // a fixed period. It acts on the same BUY/SELL signals as the Signals page
+  // (CONFIG.signals thresholds) and decides once per signal re-check.
   fund: {
     base: Number(process.env.FUND_BASE || 1000), // starting virtual capital (€)
+    durationDays: Number(process.env.FUND_DAYS || 7), // challenge length
     maxWeight: 0.22, // never put more than 22% of the fund in one asset
     tradeFraction: 0.12, // deploy ~12% of fund value per buy
-    buyThreshold: 0.14, // council signal (-1..+1) needed to buy
-    sellThreshold: 0.16, // signal needed to sell out
+    stopLossPct: 7, // sell a holding that is down this much from its cost
     minTrade: 20, // ignore trades smaller than €20 (dust)
     feePct: 0.1, // 0.1% simulated trading fee (realism)
-    autoMin: Number(process.env.AUTOTRADE_MIN || 8), // minutes between auto cycles
     autoOn: process.env.AUTOTRADE !== 'off', // auto-trade on by default
   },
 

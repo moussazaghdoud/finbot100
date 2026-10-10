@@ -2,10 +2,18 @@
 // Also: the signals' own track record, and alerts when a signal flips.
 import { CONFIG } from '../config.js';
 import { runDebate } from './debate.js';
-import { signalFromBrief } from '../fund/trader.js';
 import { loadPredictions, readJson, writeJson } from '../ledger/store.js';
+import { logEvent } from '../bot/activity.js';
 
 const S = CONFIG.signals;
+
+// Council signal in -1..+1 (confidence-weighted net stance).
+export function signalFromBrief(brief) {
+  if (!brief?.theses?.length) return 0;
+  let s = 0;
+  for (const t of brief.theses) s += t.stance === 'bullish' ? t.confidence : t.stance === 'bearish' ? -t.confidence : 0;
+  return +(s / (brief.theses.length * 90)).toFixed(3);
+}
 
 export function actionFor(score) {
   if (score >= S.buyThreshold) return 'BUY';
@@ -31,18 +39,20 @@ function toSignal(brief) {
     votes: { bull: b, bear: r, neutral: brief.theses.length - b - r },
     reason: action === 'SELL' ? m.bearCase : action === 'BUY' ? m.bullCase : m.summary,
     risk: action === 'SELL' ? m.bullCase : m.bearCase,
+    theses: brief.theses.map((t) => ({ agent: t.agent, stance: t.stance, confidence: t.confidence, thesis: t.thesis })),
     ts: brief.ts,
   };
 }
 
 // Debates are cached per asset (CONFIG.debateCacheMin), so this is cheap after the first run.
-export async function getSignals() {
+export async function getSignals({ onProgress } = {}) {
   const ids = CONFIG.universe.map((a) => a.id);
   const out = [];
   const queue = [...ids];
   const worker = async () => {
     while (queue.length) {
       const id = queue.shift();
+      onProgress?.(ids.length - queue.length, ids.length, id);
       try {
         out.push(toSignal(await runDebate(id)));
       } catch (e) {
@@ -135,7 +145,10 @@ async function detectFlips(signals) {
   st.events.push(...fresh);
   st.events = st.events.slice(-200);
   writeJson(CONFIG.alertsFile, st);
-  for (const e of fresh) await pushNtfy(e);
+  for (const e of fresh) {
+    logEvent('flip', `${e.asset} signal changed: ${e.from} → ${e.to}`, { asset: e.asset, from: e.from, to: e.to, price: e.price });
+    await pushNtfy(e);
+  }
   return fresh;
 }
 

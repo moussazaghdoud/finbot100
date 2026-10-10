@@ -15,6 +15,9 @@ async function boot() {
   setupNav();
   refreshCapital();
   startAlertWatch();
+  refreshPill();
+  setInterval(refreshPill, 15000);
+  $('#bot-pill').addEventListener('click', () => { location.hash = 'fund'; });
 
   // deep-link: #signals, #council, #council/NVDA, #ledger, #fund
   const route = () => {
@@ -519,17 +522,232 @@ function renderLedger(l, me) {
   });
 }
 
-// ── FUND (auto-trader) ────────────────────────────────
-let fundTimer = null;
-function stopFundPoll() { if (fundTimer) { clearInterval(fundTimer); fundTimer = null; } }
+// ── BOT (status · challenge · live journal) ───────────
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const eur = (n) => '€' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pctS = (n) => (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%';
+const bot = { timer: null, events: [], lastT: 0, view: null, viewAt: 0, status: null, onlyTrades: false, open: new Set() };
+
+function stopFundPoll() { if (bot.timer) { clearInterval(bot.timer); bot.timer = null; } }
 function startFundPoll() {
-  loadFund();
-  fundTimer = setInterval(loadFund, 15000); // refresh value/trades every 15s
+  loadBot(true);
+  bot.timer = setInterval(() => loadBot(false), 5000);
 }
 
-async function loadFund() {
-  const f = await api('/api/fund');
-  renderFund(f);
+async function loadBot(full) {
+  const wasThinking = bot.status?.phase === 'thinking';
+  const a = await api('/api/activity?since=' + bot.lastT + '&limit=' + (bot.lastT ? 400 : 1500));
+  bot.status = a.status;
+  if (a.events.length) {
+    bot.events.push(...a.events);
+    bot.lastT = a.events[a.events.length - 1].t;
+    bot.events = bot.events.slice(-3000);
+  }
+  const cycleEnded = wasThinking && a.status.phase !== 'thinking';
+  if (full || cycleEnded || !bot.view || Date.now() - bot.viewAt > 30000) {
+    bot.view = await api('/api/fund');
+    bot.viewAt = Date.now();
+  }
+  if (full || a.events.length || cycleEnded) renderBot();
+  else renderBotStatus();
+}
+
+function fmtIn(ms) {
+  if (ms <= 0) return 'now';
+  const m = Math.round(ms / 60000);
+  if (m < 60) return m + ' min';
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+function statusInfo(s) {
+  if (!s) return { cls: 'stopped', text: 'Server unreachable — the bot is not running' };
+  if (s.health === 'thinking') {
+    const p = s.progress || {};
+    return { cls: 'thinking', text: p.step === 'deciding' ? 'Thinking — deciding what to trade…' : `Thinking — analysing ${p.asset || '…'} (${p.i || 0}/${p.n || '?'})` };
+  }
+  if (s.health === 'late') return { cls: 'late', text: `Late — last cycle ${timeAgo(s.lastRunAt)}, next one is overdue` };
+  return { cls: 'live', text: `Live — last cycle ${s.lastRunAt ? timeAgo(s.lastRunAt) : 'not yet'} · next in ${fmtIn(s.nextRunAt - Date.now())}` };
+}
+
+function renderBotStatus() {
+  const s = bot.status, i = statusInfo(s);
+  const el = $('#bot-status');
+  if (!el) return;
+  const p = s?.progress;
+  el.className = 'bot-status panel ' + i.cls;
+  el.innerHTML = `
+    <span class="light ${i.cls}"></span>
+    <div style="flex:1">
+      <div class="bs-text">${i.text}</div>
+      <div class="bs-sub">${s ? `engine: ${esc(s.engine)} · a cycle every ${s.everyMin} min · server up ${fmtIn(s.uptimeSec * 1000)}${s.lastError ? ` · <span class="down">last error: ${esc(s.lastError)}</span>` : ''}` : 'Start it with npm start (or check Railway).'}</div>
+      ${p && p.n ? `<div class="bs-bar"><i style="width:${Math.round(((p.step === 'deciding' ? p.n : Math.max(0, p.i - 1)) / p.n) * 100)}%"></i></div>` : ''}
+    </div>
+    <button class="btn ghost" id="run-cycle" ${s?.phase === 'thinking' ? 'disabled' : ''}>▸ Run a cycle now</button>`;
+  $('#run-cycle').onclick = async () => { await api('/api/bot/run', { method: 'POST' }); loadBot(false); };
+}
+
+function challengeHero(f) {
+  if (f.status === 'idle') {
+    return `<div class="panel fade-in hero-idle">
+      <div class="fh-label">The ${f.durationDays}-day challenge</div>
+      <h2 class="asset-title" style="margin:6px 0 10px">Give the bot ${eur(f.base)} of virtual money and let it trade alone for ${f.durationDays} days.</h2>
+      <ul class="rules">
+        <li>Every ${state.config.signalsEveryMin} min it analyses all ${state.config.universe.length} assets and acts on the <b>BUY / SELL</b> signals.</li>
+        <li>Buys ~12% of the fund per signal, max 22% in one asset. Sells on a SELL signal or a <b>-${f.stopLossPct}% stop-loss</b>.</li>
+        <li>Real live prices. Crypto trades 24/7; US stocks only while the market is open. € converted at the live EUR/USD rate, 0.1% fee per trade.</li>
+        <li>Every decision — including "do nothing" — is written in the journal with its reasons. At the end you see the result against simple alternatives.</li>
+      </ul>
+      <button class="btn" id="start-ch">▶ Start the ${eur(f.base)} challenge</button>
+      <div class="fh-note" style="margin-top:8px">The server must keep running for all ${f.durationDays} days (Railway, or leave this PC on). Gaps are shown in the journal.</div>
+    </div>`;
+  }
+  const ended = f.status === 'ended';
+  const up = f.pnl >= 0, col = up ? 'var(--green)' : 'var(--red)';
+  const done = Math.min(1, (Date.now() - f.startedAt) / (f.endsAt - f.startedAt));
+  const day = Math.min(f.durationDays, Math.floor((Date.now() - f.startedAt) / 86400000) + 1);
+  return `<div class="fund-hero panel fade-in">
+    <div class="fh-left">
+      <div class="fh-label">${ended ? 'Final result' : `Day ${day} of ${f.durationDays}`} · started ${new Date(f.startedAt).toLocaleString()}</div>
+      <div class="fh-value numeric" style="color:${col}">${eur(f.total)}</div>
+      <div class="fh-pnl numeric" style="color:${col}">${up ? '▲ +' : '▼ '}${eur(f.pnl)} (${pctS(f.pnlPct)}) <span style="color:var(--dim)">vs ${eur(f.base)} start</span></div>
+      <div class="fh-sub">cash ${eur(f.cash)} · invested ${eur(f.invested)} · realised ${eur(f.realized)} · fees ${eur(f.fees)} · ${f.tradeCount} trades${f.fx ? ` · EUR/USD ${f.fx}` : ''}</div>
+      ${ended ? '' : `<div class="ch-bar"><i style="width:${(done * 100).toFixed(1)}%"></i></div><div class="fh-note">ends ${new Date(f.endsAt).toLocaleString()} · in ${fmtIn(f.endsAt - Date.now())}</div>`}
+    </div>
+    <div class="fh-right">
+      ${ended ? `<button class="btn" id="start-ch">▶ Start a new challenge</button>` : `
+      <div class="auto-toggle ${f.autoOn ? 'on' : ''}" id="auto-toggle" title="pause / resume trading">
+        <span class="dot2"></span> Auto-trading ${f.autoOn ? 'ON' : 'PAUSED'}
+      </div>`}
+      <button class="btn ghost" id="reset-fund">Reset</button>
+      <div class="fh-note">${f.marketOpen ? 'US market open' : 'US market closed — stocks wait, crypto trades'}</div>
+    </div>
+  </div>`;
+}
+
+function benchPanel(f) {
+  if (f.status === 'idle' || !f.benchmarks?.length) return '';
+  const cards = [{ id: 'bot', label: 'The bot', value: f.total, pnlPct: f.pnlPct }, ...f.benchmarks].map((b) => {
+    const beat = b.id === 'bot' ? '' : f.total >= b.value ? `<span class="up">bot ahead by ${eur(f.total - b.value)}</span>` : `<span class="down">bot behind by ${eur(b.value - f.total)}</span>`;
+    return `<div class="bench ${b.id === 'bot' ? 'me' : ''}"><div class="track-sub">${esc(b.label)}</div>
+      <div class="bench-v numeric">${eur(b.value)}</div><div class="numeric ${cls(b.pnlPct)}" style="font-size:12px">${pctS(b.pnlPct)}</div><div style="font-size:11px;margin-top:4px">${beat}</div></div>`;
+  }).join('');
+  return `<div class="panel fade-in" style="margin-top:16px"><div class="section-title">Is the bot worth it? — same ${eur(f.base)}, same dates</div><div class="bench-grid">${cards}</div></div>`;
+}
+
+function holdingsPanel(f) {
+  if (f.status === 'idle') return '';
+  const rows = f.holdings.length
+    ? `<div class="hold-grid head"><span>Asset</span><span>Value</span><span>Weight</span><span>P&L</span></div>` +
+      f.holdings.map((h) => `<div class="hold-grid"><span><b>${h.asset}</b> <span style="color:var(--dimmer);font-size:11px">${h.boughtAt ? 'since ' + timeAgo(h.boughtAt) : ''}</span></span>
+        <span class="numeric">${eur(h.value)}</span><span class="numeric" style="color:var(--dim)">${((h.value / f.total) * 100).toFixed(0)}%</span>
+        <span class="numeric ${cls(h.pnlPct)}">${pctS(h.pnlPct)}</span></div>`).join('')
+    : `<div class="empty">All cash — the bot hasn't found a BUY worth taking yet.</div>`;
+  return `<div class="two-col">
+    <div class="panel"><div class="section-title">Value over time</div>${equityCurve(f.equity, f.base)}</div>
+    <div class="panel"><div class="section-title">Holdings · ${f.holdings.length}</div>${rows}</div>
+  </div>`;
+}
+
+const ICON = { trade: '⇄', decision: '💭', offline: '⚠', error: '✕', flip: '↻', daily: '📅', result: '🏁', challenge: '▶', graded: '⚖' };
+
+function thesisList(theses) {
+  return (theses || []).map((t) => `<div class="th"><span class="stance ${t.stance}">${t.stance}</span> <b>${esc(t.agent)}</b> <span class="numeric" style="color:var(--dim)">${t.confidence}%</span> — ${esc(t.thesis)}</div>`).join('');
+}
+
+function tradeCard(e) {
+  const t = e.trade, buy = t.side === 'BUY';
+  return `<div class="ev trade">
+    <div class="ev-h"><span class="sig-action ${buy ? 'buy' : 'sell'}">${t.side}</span> <b>${t.asset}</b> <span class="numeric">${eur(t.value)} @ $${+Number(t.priceUsd).toFixed(4)}</span>
+      ${t.side === 'SELL' ? `<span class="numeric ${cls(t.realized)}">${t.realized >= 0 ? 'profit' : 'loss'} ${eur(Math.abs(t.realized))} (${pctS(t.realizedPct)})</span>` : ''}</div>
+    <div class="ev-why"><b>${esc(t.headline)}</b></div>
+    ${t.reason ? `<div class="ev-why">Why: ${esc(t.reason)}</div>` : ''}
+    ${t.risk ? `<div class="ev-risk">Risk it accepts: ${esc(t.risk)}</div>` : ''}
+    ${t.theses?.length ? `<details><summary>What each analyst said</summary>${thesisList(t.theses)}</details>` : ''}
+  </div>`;
+}
+
+function cycleCard(c) {
+  const end = c.events.find((e) => e.type === 'cycle_end');
+  const start = c.events.find((e) => e.type === 'cycle');
+  const trades = c.events.filter((e) => e.type === 'trade');
+  const notes = c.events.filter((e) => ['decision', 'error', 'flip', 'graded'].includes(e.type));
+  const analyses = c.events.filter((e) => e.type === 'analysis');
+  const key = 'c' + c.id;
+  return `<div class="cycle ${trades.length ? 'has-trades' : ''}">
+    <div class="cy-h"><span class="cy-time">${new Date(c.t).toLocaleString()}</span>
+      <span class="cy-tag">${!end ? '🧠 thinking…' : trades.length ? `${trades.length} trade${trades.length > 1 ? 's' : ''}` : 'no trade'}</span></div>
+    <div class="cy-sum">${esc(end ? end.text : start?.text || '')}</div>
+    ${trades.map(tradeCard).join('')}
+    ${notes.map((n) => `<div class="ev note ${n.type}">${ICON[n.type] || '·'} ${esc(n.text)}</div>`).join('')}
+    ${analyses.length ? `<details data-key="${key}" ${bot.open.has(key) ? 'open' : ''}><summary>Show the thinking — ${analyses.length} assets analysed</summary>
+      ${analyses.map((a) => `<div class="an-row">
+        <span class="sig-action ${a.action.toLowerCase()}">${a.action}</span> <b>${a.asset}</b>
+        <span class="numeric" style="color:var(--dim)">${a.votes.bull}↑ ${a.votes.bear}↓ · strength ${a.strength}${a.price ? ` · $${+Number(a.price).toFixed(4)}` : ''}</span>
+        <div class="an-why">${esc(a.reason)}${a.risk ? `<div class="ev-risk">Risk: ${esc(a.risk)}</div>` : ''}</div>
+        ${a.theses?.length ? `<details><summary>The 6 analysts</summary>${thesisList(a.theses)}</details>` : ''}
+      </div>`).join('')}
+    </details>` : ''}
+  </div>`;
+}
+
+function journal() {
+  const items = [];
+  const cycles = new Map();
+  for (const e of bot.events) {
+    if (e.cycle) {
+      if (!cycles.has(e.cycle)) { const c = { kind: 'cycle', id: e.cycle, t: e.t, events: [] }; cycles.set(e.cycle, c); items.push(c); }
+      cycles.get(e.cycle).events.push(e);
+    } else items.push({ kind: 'event', t: e.t, e });
+  }
+  let list = items.reverse();
+  if (bot.onlyTrades) list = list.filter((x) => (x.kind === 'event' ? ['result', 'challenge', 'offline', 'daily'].includes(x.e.type) : x.events.some((e) => e.type === 'trade')));
+  const html = list.slice(0, 120).map((x) => (x.kind === 'cycle' ? cycleCard(x)
+    : `<div class="ev solo ${x.e.type}"><span class="cy-time">${new Date(x.t).toLocaleString()}</span> ${ICON[x.e.type] || '·'} ${esc(x.e.text)}</div>`)).join('');
+  return `<div class="panel fade-in" style="margin-top:16px">
+    <div class="sig-top" style="margin-bottom:10px"><div class="section-title" style="margin:0">Journal — what the bot thought, decided and did</div>
+      <label class="track-sub" style="cursor:pointer"><input type="checkbox" id="only-trades" ${bot.onlyTrades ? 'checked' : ''}> only cycles with trades</label></div>
+    ${html || '<div class="empty">Nothing yet — the first cycle runs ~20 s after the server starts.</div>'}
+  </div>`;
+}
+
+function renderBot() {
+  const f = bot.view;
+  if (!f) return;
+  const scroll = $('#fund').scrollTop;
+  $('#fund-body').innerHTML = `<div id="bot-status"></div>` + challengeHero(f) + benchPanel(f) + holdingsPanel(f) + journal() + fundNote();
+  renderBotStatus();
+  $('#fund').scrollTop = scroll;
+  document.querySelectorAll('#fund-body details[data-key]').forEach((d) => d.addEventListener('toggle', () => (d.open ? bot.open.add(d.dataset.key) : bot.open.delete(d.dataset.key))));
+  $('#only-trades').onchange = (e) => { bot.onlyTrades = e.target.checked; renderBot(); };
+  $('#start-ch')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = 'Starting…';
+    await api('/api/fund/start', { method: 'POST' });
+    loadBot(true);
+  });
+  $('#auto-toggle')?.addEventListener('click', async () => {
+    await api('/api/fund/auto', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: !f.autoOn }) });
+    loadBot(true);
+  });
+  $('#reset-fund')?.addEventListener('click', async () => {
+    if (confirm('Reset? This ends the current challenge and clears its trades (the journal is kept).')) {
+      await api('/api/fund/reset', { method: 'POST' });
+      loadBot(true);
+    }
+  });
+}
+
+// Header status pill — visible on every tab.
+async function refreshPill() {
+  let s = null;
+  try { s = await api('/api/status'); } catch {}
+  const i = statusInfo(s);
+  const short = !s ? 'offline' : s.health === 'thinking' ? `thinking ${s.progress?.i || 0}/${s.progress?.n || '?'}` : s.health === 'late' ? 'late' : `live · next ${fmtIn(s.nextRunAt - Date.now())}`;
+  const el = $('#bot-pill');
+  el.className = 'badge pill ' + i.cls;
+  el.title = i.text;
+  el.innerHTML = `<span class="light ${i.cls}"></span> bot ${short}`;
 }
 
 function equityCurve(equity, base) {
@@ -564,81 +782,8 @@ function timeAgo(ts) {
   return Math.floor(s / 3600) + 'h ago';
 }
 
-function renderFund(f) {
-  const body = $('#fund-body');
-  const up = f.pnl >= 0;
-  const col = up ? 'var(--green)' : 'var(--red)';
-  const hero = `
-    <div class="fund-hero panel fade-in">
-      <div class="fh-left">
-        <div class="fh-label">FinBot Fund · virtual capital</div>
-        <div class="fh-value numeric" style="color:${col}">€${f.total.toFixed(2)}</div>
-        <div class="fh-pnl numeric" style="color:${col}">${up ? '▲' : '▼'} ${up ? '+' : ''}€${f.pnl.toFixed(2)} (${up ? '+' : ''}${f.pnlPct.toFixed(2)}%) <span style="color:var(--dim)">vs €${f.base} start</span></div>
-        <div class="fh-sub">cash €${f.cash.toFixed(2)} · invested €${f.invested.toFixed(2)} · ${f.tradeCount} trades · last cycle ${timeAgo(f.lastTickAt)}</div>
-      </div>
-      <div class="fh-right">
-        <div class="auto-toggle ${f.autoOn ? 'on' : ''}" id="auto-toggle" title="auto-trading">
-          <span class="dot2"></span> Auto-trading ${f.autoOn ? 'ON' : 'OFF'}
-        </div>
-        <div class="fh-controls">
-          <button class="btn" id="run-cycle">▸ Run a cycle now</button>
-          <button class="btn ghost" id="reset-fund">Reset €${f.base}</button>
-        </div>
-        <div class="fh-note">auto every ${f.autoMin} min</div>
-      </div>
-    </div>`;
-
-  const chart = `<div class="panel" style="margin-top:16px"><div class="section-title">Equity curve — €${f.base} start</div>${equityCurve(f.equity, f.base)}</div>`;
-
-  const holdings = f.holdings.length
-    ? `<div class="panel" style="margin-top:16px"><div class="section-title">Holdings · ${f.holdings.length}</div>
-       <div class="hold-grid head"><span>Asset</span><span>Value</span><span>Weight</span><span>P&L</span></div>
-       ${f.holdings.map((h) => {
-         const a = state.agents; // unused
-         const w = ((h.value / f.total) * 100).toFixed(0);
-         const pu = h.pnlPct >= 0;
-         return `<div class="hold-grid"><span><b>${h.asset}</b></span>
-           <span class="numeric">€${h.value.toFixed(2)}</span>
-           <span class="numeric" style="color:var(--dim)">${w}%</span>
-           <span class="numeric ${pu ? 'up' : 'down'}">${pu ? '+' : ''}${h.pnlPct.toFixed(2)}%</span></div>`;
-       }).join('')}</div>`
-    : `<div class="panel" style="margin-top:16px"><div class="section-title">Holdings</div><div class="empty">No positions yet — the fund is all cash. Hit “Run a cycle now” to let the Council deploy capital.</div></div>`;
-
-  const trades = f.trades.length
-    ? `<div class="panel" style="margin-top:16px"><div class="section-title">Live trades</div><div class="feed">
-       ${f.trades.map((t) => {
-         const buy = t.side === 'BUY';
-         return `<div class="feed-row"><div class="mark ${buy ? 'hit' : 'miss'}">${buy ? '↑' : '↓'}</div>
-           <b style="color:${buy ? 'var(--green)' : 'var(--red)'}">${t.side}</b>
-           <b>${t.asset}</b>
-           <span style="color:var(--dim)">€${t.value.toFixed(2)} @ ${fmtPrice(t.price)}</span>
-           <span style="flex:1"></span>
-           <span style="color:var(--dim);font-size:11.5px">${t.reason}</span>
-           <span style="color:var(--dimmer);font-size:11px">${timeAgo(t.t)}</span></div>`;
-       }).join('')}</div></div>`
-    : '';
-
-  body.innerHTML = hero + chart + holdings + trades + fundNote();
-
-  $('#auto-toggle').addEventListener('click', async () => {
-    const r = await api('/api/fund/auto', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: !f.autoOn }) });
-    loadFund();
-  });
-  $('#run-cycle').addEventListener('click', async (e) => {
-    e.target.disabled = true; e.target.textContent = '… thinking & trading';
-    await api('/api/fund/tick', { method: 'POST' });
-    loadFund();
-  });
-  $('#reset-fund').addEventListener('click', async () => {
-    if (confirm('Reset the fund back to €' + f.base + ' and clear all trades?')) {
-      await api('/api/fund/reset', { method: 'POST' });
-      loadFund();
-    }
-  });
-}
-
 function fundNote() {
-  return `<div class="disclaimer">The FinBot Fund is a simulation: it trades a virtual €${''} balance at real live prices, with a 0.1% simulated fee. No real money and no real broker are involved — it shows how the Council's own decisions would have performed. Past simulated performance does not predict anything; this is educational, not investment advice.</div>`;
+  return `<div class="disclaimer">Simulation with virtual money at real live prices (crypto via Binance, stocks via live quotes), converted at the live EUR/USD rate with a 0.1% fee per trade. Not modelled: bid/ask spread, slippage, broker minimums, exchange holidays. The bot only acts while the server is running — offline gaps are shown in the journal.</div>`;
 }
 
 function ledgerNote() {

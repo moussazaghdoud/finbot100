@@ -6,3 +6,5 @@ data/fund.json
 _shot*.png
 _edge_err.txt
 data/alerts.json
+data/activity.json
+data/fund.legacy-*.json

@@ -236,3 +236,54 @@ input[type=range] { accent-color: var(--accent2); flex: 1; max-width: 240px; }
 .alerts { margin-bottom: 16px; }
 @media (max-width: 1000px) { .track-grid { grid-template-columns: 1fr 1fr 1fr; } .track-recent { grid-column: 1 / -1; } }
 .track-tag { font-size: 10px; color: var(--dim); border: 1px solid var(--border); border-radius: 5px; padding: 0 4px; }
+
+/* ── Bot tab ─────────────────────────────────────────── */
+.light { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; background: var(--dim); }
+.light.live { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse2 2s infinite; }
+.light.thinking { background: var(--accent2); box-shadow: 0 0 12px var(--accent2); animation: pulse2 0.8s infinite; }
+.light.late { background: var(--yellow); box-shadow: 0 0 10px var(--yellow); }
+.light.stopped { background: var(--red); box-shadow: 0 0 10px var(--red); }
+.pill { cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+.bot-status { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; padding: 14px 18px; }
+.bot-status.thinking { border-color: rgba(34,211,238,0.45); }
+.bot-status.late { border-color: rgba(251,191,36,0.45); }
+.bot-status.stopped { border-color: rgba(251,113,133,0.45); }
+.bs-text { font-weight: 700; font-size: 14px; }
+.bs-sub { color: var(--dim); font-size: 11.5px; margin-top: 3px; }
+.bs-bar, .ch-bar { height: 5px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; margin-top: 8px; max-width: 420px; }
+.bs-bar > i { display: block; height: 100%; background: var(--accent2); transition: width 0.4s; }
+.ch-bar > i { display: block; height: 100%; background: var(--accent); }
+.hero-idle .rules { margin: 0 0 16px; padding-left: 18px; color: var(--dim); line-height: 1.7; font-size: 13px; }
+.hero-idle .rules b { color: var(--text); }
+.bench-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+.bench { background: var(--panel-solid); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.bench.me { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(124,92,255,0.35); }
+.bench-v { font-size: 20px; font-weight: 800; margin-top: 4px; }
+.two-col { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-top: 16px; }
+.cycle { border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; background: rgba(255,255,255,0.015); }
+.cycle.has-trades { border-left-color: var(--accent); background: rgba(124,92,255,0.05); }
+.cy-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.cy-time { color: var(--dimmer); font-size: 11.5px; font-family: var(--mono); }
+.cy-tag { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.cy-sum { font-size: 13px; margin: 6px 0 4px; }
+.ev { font-size: 12.5px; line-height: 1.5; margin-top: 8px; }
+.ev.trade { background: var(--panel-solid); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.ev-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13.5px; }
+.ev-h .sig-action { padding: 3px 10px; font-size: 11px; }
+.ev-why { margin-top: 5px; }
+.ev-risk { color: var(--dim); font-size: 11.5px; margin-top: 3px; }
+.ev.note { color: var(--dim); }
+.ev.note.error { color: var(--red); }
+.ev.note.flip { color: var(--accent2); }
+.ev.solo { padding: 9px 12px; border-radius: 10px; margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+.ev.solo.offline { border-color: rgba(251,191,36,0.45); color: var(--yellow); }
+.ev.solo.result, .ev.solo.challenge { border-color: rgba(124,92,255,0.5); font-weight: 600; }
+.ev.solo.daily { border-color: rgba(34,211,238,0.35); }
+.cycle details, .ev details { margin-top: 8px; }
+.cycle summary, .ev summary { cursor: pointer; color: var(--accent2); font-size: 12px; }
+.an-row { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.an-row .sig-action { display: inline-block; padding: 2px 8px; font-size: 10.5px; margin-right: 4px; }
+.an-why { margin-top: 4px; }
+.th { font-size: 12px; padding: 4px 0 4px 10px; border-left: 2px solid var(--border); margin: 4px 0; }
+.th .stance { margin-left: 0; padding: 1px 6px; font-size: 10px; }
+@media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
