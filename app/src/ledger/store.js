@@ -5,7 +5,7 @@ import { CONFIG } from '../config.js';
 function ensureDir() {
   if (!existsSync(CONFIG.dataDir)) mkdirSync(CONFIG.dataDir, { recursive: true });
 }
-function readJson(file, fallback) {
+export function readJson(file, fallback) {
   if (!existsSync(file)) return fallback;
   try {
     return JSON.parse(readFileSync(file, 'utf8'));
@@ -13,7 +13,7 @@ function readJson(file, fallback) {
     return fallback;
   }
 }
-function writeJson(file, data) {
+export function writeJson(file, data) {
   ensureDir();
   writeFileSync(file, JSON.stringify(data, null, 2));
 }

@@ -1,6 +1,6 @@
 // Calibration scoreboard — the product's trust spine.
 export function scoreboard(predictions) {
-  const resolved = predictions.filter((p) => p.resolved);
+  const resolved = predictions.filter((p) => p.resolved && !p.void);
   const by = {};
   for (const p of resolved) {
     const k = p.agent;

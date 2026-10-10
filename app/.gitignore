@@ -2,5 +2,7 @@ node_modules/
 .env
 data/predictions.json
 data/user.json
+data/fund.json
 _shot*.png
 _edge_err.txt
+data/alerts.json

@@ -1,4 +1,4 @@
-// FinBot 100 frontend — vanilla JS. Three views: Universe map, Council, Ledger.
+// FinBot 100 frontend — vanilla JS. Views: Signals, Council, Fund, Ledger (Universe map hidden for now).
 const $ = (s) => document.querySelector(s);
 const api = (p, opts) => fetch(p, opts).then((r) => r.json());
 const fmtPrice = (n) => (n >= 1000 ? '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '$' + n.toFixed(2));
@@ -13,20 +13,19 @@ async function boot() {
   state.agents = state.config.agents;
   $('#llm-badge').innerHTML = 'engine: <b>' + state.config.llmMode + '</b>';
   setupNav();
-  await loadUniverse();
-  initMap();
   refreshCapital();
+  startAlertWatch();
 
-  // deep-link: #council, #council/NVDA, #ledger
+  // deep-link: #signals, #council, #council/NVDA, #ledger, #fund
   const route = () => {
     const h = location.hash.replace('#', '');
     const [view, asset] = h.split('/');
     if (view === 'council') { state.selected = asset || state.selected || 'BTC'; switchView('council'); loadCouncil(state.selected); }
-    else if (view === 'ledger') switchView('ledger');
-    else switchView('universe');
+    else if (view === 'ledger' || view === 'fund') switchView(view);
+    else switchView('signals');
   };
   window.addEventListener('hashchange', route);
-  if (location.hash) route();
+  route();
 }
 
 function setupNav() {
@@ -37,7 +36,119 @@ function setupNav() {
 function switchView(v) {
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   document.querySelectorAll('.view').forEach((s) => s.classList.toggle('active', s.id === v));
+  stopFundPoll();
+  if (v === 'signals') loadSignals();
+  if (v === 'council' && !state.currentBrief) loadCouncil(state.selected || 'BTC');
   if (v === 'ledger') loadLedger();
+  if (v === 'fund') startFundPoll();
+}
+
+// ── SIGNALS ───────────────────────────────────────────
+async function loadSignals(force) {
+  const body = $('#signals-body');
+  if (force || !state.signals) {
+    body.innerHTML = `<div class="loading">Running the Council on every asset… (first run can take a minute)</div>`;
+    state.signals = await api('/api/signals');
+    state.seenAlerts = new Set(state.signals.alerts.map((a) => a.id));
+  }
+  renderSignals(state.signals);
+}
+
+const pct = (v) => (v == null ? '—' : v + '%');
+
+function trackPanel(t) {
+  const card = (a, label, hint) => {
+    const x = t.byAction[a];
+    return `<div class="track-card">
+      <div class="sig-action ${a.toLowerCase()}">${a}</div>
+      <div class="track-hr numeric">${pct(x.hitRate)}</div>
+      <div class="track-sub">${label} · ${x.hits}/${x.n} calls</div>
+      <div class="track-sub">avg ${t.horizonDays}d move after: <b class="numeric ${cls(x.avgReturn)}">${x.avgReturn == null ? '—' : sign(x.avgReturn)}</b></div>
+      <div class="track-hint">${hint}</div>
+    </div>`;
+  };
+  const recent = t.recent.length
+    ? t.recent.map((r) => `<div class="track-row"><span class="${r.correct ? 'up' : 'down'}">${r.correct ? '✓' : '✗'}</span> ${new Date(r.createdAt).toLocaleDateString()}${r.seeded ? ' <span class="track-tag">backtest</span>' : ''} · <b>${r.action}</b> ${r.asset} @ ${fmtPrice(r.priceAtCall)} → <span class="numeric ${cls(r.ret)}">${sign(r.ret)}</span></div>`).join('')
+    : `<div class="empty">No graded BUY/SELL calls yet.</div>`;
+  return `<div class="panel fade-in track">
+    <h3 class="section-title">Is it right? — the bot's own track record</h3>
+    <div class="track-sub" style="margin:-6px 0 12px">${t.live} live calls + ${t.backtest} backtest calls (rule-based analysts replayed on real past prices). Live calls are what count.</div>
+    <div class="track-grid">
+      ${card('BUY', 'went up', 'right if the price rose')}
+      ${card('SELL', 'went down', 'right if the price fell')}
+      ${card('HOLD', 'stayed flat', `right if it moved less than ±${state.config.neutralBand ?? 1.5}%`)}
+      <div class="track-recent"><div class="track-sub" style="margin-bottom:6px">Latest graded calls · ${t.pending} still waiting</div>${recent}</div>
+    </div>
+  </div>`;
+}
+
+function alertsPanel(alerts) {
+  if (!alerts.length) return '';
+  return `<div class="panel fade-in alerts">
+    <h3 class="section-title">Recent changes</h3>
+    ${alerts.slice(0, 8).map((a) => `<div class="track-row">${timeAgo(a.t)} · <b>${a.asset}</b> ${a.from} → <b class="${a.to === 'BUY' ? 'up' : a.to === 'SELL' ? 'down' : ''}">${a.to}</b> @ ${fmtPrice(a.price)}</div>`).join('')}
+  </div>`;
+}
+
+function renderSignals(d) {
+  const ok = d.signals.filter((s) => !s.error);
+  const count = (a) => ok.filter((s) => s.action === a).length;
+  const rows = d.signals
+    .map((s) => {
+      if (s.error) return `<div class="sig-row"><div class="sig-asset"><b>${s.asset}</b><span>${s.name}</span></div><div class="sig-reason" style="color:var(--dim)">no data: ${s.error}</div></div>`;
+      const rec = d.track.byAsset[s.asset];
+      return `
+      <div class="sig-row" data-asset="${s.asset}">
+        <div class="sig-action ${s.action.toLowerCase()}">${s.action}</div>
+        <div class="sig-asset"><b>${s.asset}</b><span>${s.name}</span></div>
+        <div class="sig-num numeric">${fmtPrice(s.price)}<span class="${cls(s.ret7d)}">7d ${sign(s.ret7d)}</span></div>
+        <div class="sig-num numeric">${s.strength}<span>strength</span></div>
+        <div class="sig-num numeric">${s.votes.bull}↑ ${s.votes.bear}↓<span>analysts</span></div>
+        <div class="sig-num numeric">${rec ? `${rec.hits}/${rec.n}` : '—'}<span>right here</span></div>
+        <div class="sig-reason">${s.reason}<div class="sig-risk">Risk: ${s.risk}</div></div>
+      </div>`;
+    })
+    .join('');
+  const canNotify = 'Notification' in window;
+  const bell = !canNotify ? '' : Notification.permission === 'granted'
+    ? `<span class="badge">🔔 alerts on</span>`
+    : `<button class="btn ghost" id="sig-bell">🔔 Enable alerts</button>`;
+  $('#signals-body').innerHTML = `
+    <div class="sig-top fade-in">
+      <div>
+        <h2 class="asset-title">Today's signals</h2>
+        <div class="asset-meta">${count('BUY')} buy · ${count('SELL')} sell · ${count('HOLD')} hold · ${d.horizonDays}-day horizon · updated ${timeAgo(d.ts)}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">${bell}<button class="btn ghost" id="sig-refresh">↻ Refresh</button></div>
+    </div>
+    ${trackPanel(d.track)}
+    ${alertsPanel(d.alerts)}
+    <div class="sig-list fade-in">${rows}</div>
+    ${signalsNote()}`;
+  $('#sig-refresh').addEventListener('click', () => loadSignals(true));
+  $('#sig-bell')?.addEventListener('click', async () => { await Notification.requestPermission(); renderSignals(d); });
+  document.querySelectorAll('.sig-row[data-asset]').forEach((r) =>
+    r.addEventListener('click', () => { location.hash = 'council/' + r.dataset.asset; })
+  );
+}
+
+function signalsNote() {
+  return `<div class="disclaimer">Signals come from the AI analysts' debate on price, volatility, macro and news data. Click a row to see the full argument. Each call is graded after ${state.config.horizonDays} days — trust the track record above, not the confidence. The server re-checks every ${state.config.signalsEveryMin} min and alerts you when a signal changes.</div>`;
+}
+
+// Poll for signal flips (cheap: no debates) and raise a browser notification.
+function startAlertWatch() {
+  setInterval(async () => {
+    const { alerts } = await api('/api/alerts');
+    state.seenAlerts ||= new Set(alerts.map((a) => a.id));
+    const fresh = alerts.filter((a) => !state.seenAlerts.has(a.id));
+    if (!fresh.length) return;
+    fresh.forEach((a) => state.seenAlerts.add(a.id));
+    if ('Notification' in window && Notification.permission === 'granted')
+      fresh.forEach((a) => new Notification(`FinBot: ${a.asset} ${a.from} → ${a.to}`, { body: `${a.name} at ${fmtPrice(a.price)} · strength ${a.strength}` }));
+    state.signals = null; // stale — reload on next visit
+    if ($('#signals').classList.contains('active')) loadSignals();
+  }, 60000);
 }
 
 async function refreshCapital() {
@@ -406,6 +517,128 @@ function renderLedger(l, me) {
     await api('/api/grade', { method: 'POST' });
     loadLedger();
   });
+}
+
+// ── FUND (auto-trader) ────────────────────────────────
+let fundTimer = null;
+function stopFundPoll() { if (fundTimer) { clearInterval(fundTimer); fundTimer = null; } }
+function startFundPoll() {
+  loadFund();
+  fundTimer = setInterval(loadFund, 15000); // refresh value/trades every 15s
+}
+
+async function loadFund() {
+  const f = await api('/api/fund');
+  renderFund(f);
+}
+
+function equityCurve(equity, base) {
+  const w = 900, h = 200, pad = 6;
+  if (!equity || equity.length < 2) {
+    return `<div class="empty">The equity curve will appear once the fund has run a few cycles.</div>`;
+  }
+  const vals = equity.map((e) => e.value);
+  const mn = Math.min(base, ...vals), mx = Math.max(base, ...vals), rng = mx - mn || 1;
+  const X = (i) => pad + (i / (equity.length - 1)) * (w - pad * 2);
+  const Y = (v) => h - pad - ((v - mn) / rng) * (h - pad * 2);
+  const line = equity.map((e, i) => `${X(i).toFixed(1)},${Y(e.value).toFixed(1)}`).join(' ');
+  const last = vals[vals.length - 1];
+  const col = last >= base ? '#34d399' : '#fb7185';
+  const baseY = Y(base).toFixed(1);
+  const area = `${X(0).toFixed(1)},${(h - pad).toFixed(1)} ${line} ${X(equity.length - 1).toFixed(1)},${(h - pad).toFixed(1)}`;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:200px;display:block">
+    <defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${col}" stop-opacity="0.28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <polygon points="${area}" fill="url(#eg)"/>
+    <line x1="0" y1="${baseY}" x2="${w}" y2="${baseY}" stroke="rgba(255,255,255,0.18)" stroke-dasharray="4 4" stroke-width="1"/>
+    <polyline points="${line}" fill="none" stroke="${col}" stroke-width="2"/>
+  </svg>`;
+}
+
+function timeAgo(ts) {
+  if (!ts) return 'never';
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
+}
+
+function renderFund(f) {
+  const body = $('#fund-body');
+  const up = f.pnl >= 0;
+  const col = up ? 'var(--green)' : 'var(--red)';
+  const hero = `
+    <div class="fund-hero panel fade-in">
+      <div class="fh-left">
+        <div class="fh-label">FinBot Fund · virtual capital</div>
+        <div class="fh-value numeric" style="color:${col}">€${f.total.toFixed(2)}</div>
+        <div class="fh-pnl numeric" style="color:${col}">${up ? '▲' : '▼'} ${up ? '+' : ''}€${f.pnl.toFixed(2)} (${up ? '+' : ''}${f.pnlPct.toFixed(2)}%) <span style="color:var(--dim)">vs €${f.base} start</span></div>
+        <div class="fh-sub">cash €${f.cash.toFixed(2)} · invested €${f.invested.toFixed(2)} · ${f.tradeCount} trades · last cycle ${timeAgo(f.lastTickAt)}</div>
+      </div>
+      <div class="fh-right">
+        <div class="auto-toggle ${f.autoOn ? 'on' : ''}" id="auto-toggle" title="auto-trading">
+          <span class="dot2"></span> Auto-trading ${f.autoOn ? 'ON' : 'OFF'}
+        </div>
+        <div class="fh-controls">
+          <button class="btn" id="run-cycle">▸ Run a cycle now</button>
+          <button class="btn ghost" id="reset-fund">Reset €${f.base}</button>
+        </div>
+        <div class="fh-note">auto every ${f.autoMin} min</div>
+      </div>
+    </div>`;
+
+  const chart = `<div class="panel" style="margin-top:16px"><div class="section-title">Equity curve — €${f.base} start</div>${equityCurve(f.equity, f.base)}</div>`;
+
+  const holdings = f.holdings.length
+    ? `<div class="panel" style="margin-top:16px"><div class="section-title">Holdings · ${f.holdings.length}</div>
+       <div class="hold-grid head"><span>Asset</span><span>Value</span><span>Weight</span><span>P&L</span></div>
+       ${f.holdings.map((h) => {
+         const a = state.agents; // unused
+         const w = ((h.value / f.total) * 100).toFixed(0);
+         const pu = h.pnlPct >= 0;
+         return `<div class="hold-grid"><span><b>${h.asset}</b></span>
+           <span class="numeric">€${h.value.toFixed(2)}</span>
+           <span class="numeric" style="color:var(--dim)">${w}%</span>
+           <span class="numeric ${pu ? 'up' : 'down'}">${pu ? '+' : ''}${h.pnlPct.toFixed(2)}%</span></div>`;
+       }).join('')}</div>`
+    : `<div class="panel" style="margin-top:16px"><div class="section-title">Holdings</div><div class="empty">No positions yet — the fund is all cash. Hit “Run a cycle now” to let the Council deploy capital.</div></div>`;
+
+  const trades = f.trades.length
+    ? `<div class="panel" style="margin-top:16px"><div class="section-title">Live trades</div><div class="feed">
+       ${f.trades.map((t) => {
+         const buy = t.side === 'BUY';
+         return `<div class="feed-row"><div class="mark ${buy ? 'hit' : 'miss'}">${buy ? '↑' : '↓'}</div>
+           <b style="color:${buy ? 'var(--green)' : 'var(--red)'}">${t.side}</b>
+           <b>${t.asset}</b>
+           <span style="color:var(--dim)">€${t.value.toFixed(2)} @ ${fmtPrice(t.price)}</span>
+           <span style="flex:1"></span>
+           <span style="color:var(--dim);font-size:11.5px">${t.reason}</span>
+           <span style="color:var(--dimmer);font-size:11px">${timeAgo(t.t)}</span></div>`;
+       }).join('')}</div></div>`
+    : '';
+
+  body.innerHTML = hero + chart + holdings + trades + fundNote();
+
+  $('#auto-toggle').addEventListener('click', async () => {
+    const r = await api('/api/fund/auto', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: !f.autoOn }) });
+    loadFund();
+  });
+  $('#run-cycle').addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = '… thinking & trading';
+    await api('/api/fund/tick', { method: 'POST' });
+    loadFund();
+  });
+  $('#reset-fund').addEventListener('click', async () => {
+    if (confirm('Reset the fund back to €' + f.base + ' and clear all trades?')) {
+      await api('/api/fund/reset', { method: 'POST' });
+      loadFund();
+    }
+  });
+}
+
+function fundNote() {
+  return `<div class="disclaimer">The FinBot Fund is a simulation: it trades a virtual €${''} balance at real live prices, with a 0.1% simulated fee. No real money and no real broker are involved — it shows how the Council's own decisions would have performed. Past simulated performance does not predict anything; this is educational, not investment advice.</div>`;
 }
 
 function ledgerNote() {

@@ -10,9 +10,14 @@ import { makePrediction, appendPredictions, loadPredictions } from '../ledger/st
 
 const cache = new Map(); // asset -> { brief, ts }
 
-export async function runDebate(asset, { log = true } = {}) {
+export function getCachedBrief(asset) {
+  const c = cache.get(asset);
+  return c && Date.now() - c.ts < CONFIG.debateCacheMin * 60000 ? c.brief : null;
+}
+
+export async function runDebate(asset, { log = true, force = false } = {}) {
   const cached = cache.get(asset);
-  if (cached && Date.now() - cached.ts < CONFIG.debateCacheMin * 60000) return cached.brief;
+  if (!force && cached && Date.now() - cached.ts < CONFIG.debateCacheMin * 60000) return cached.brief;
 
   const meta = assetById(asset);
   const { series, source } = await fetchSeries(asset);

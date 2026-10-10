@@ -16,8 +16,9 @@
       </div>
     </div>
     <nav>
-      <button data-view="universe" class="active">◐ Universe</button>
+      <button data-view="signals" class="active">⇅ Signals</button>
       <button data-view="council">⟁ Council</button>
+      <button data-view="fund">€ Fund</button>
       <button data-view="ledger">⚖ Ledger</button>
     </nav>
     <div class="spacer"></div>
@@ -26,8 +27,15 @@
   </header>
 
   <main>
-    <!-- UNIVERSE -->
-    <section class="view active" id="universe">
+    <!-- SIGNALS -->
+    <section class="view active" id="signals">
+      <div class="pad" id="signals-body">
+        <div class="loading">Running the Council on every asset…</div>
+      </div>
+    </section>
+
+    <!-- UNIVERSE (map — hidden for now) -->
+    <section class="view" id="universe">
       <canvas id="map"></canvas>
       <div class="map-hint">Click a star to convene the Council · drag to pan · scroll to zoom</div>
       <div class="regime-chip" id="regime-chip">macro …</div>
@@ -43,7 +51,14 @@
     <!-- COUNCIL -->
     <section class="view" id="council">
       <div class="pad" id="council-body">
-        <div class="loading">Select an asset from the Universe to convene the Analyst Council.</div>
+        <div class="loading">Pick an asset in Signals to see the full debate.</div>
+      </div>
+    </section>
+
+    <!-- FUND -->
+    <section class="view" id="fund">
+      <div class="pad" id="fund-body">
+        <div class="loading">Loading the FinBot Fund…</div>
       </div>
     </section>
 

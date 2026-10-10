@@ -8,15 +8,35 @@ function judge(stance, ret) {
   return Math.abs(ret) <= CONFIG.neutralBand;
 }
 
-// Grade all due predictions across all assets. Returns count graded.
+// Grade one prediction against the close on its resolve day. If that day is
+// outside the price history we have (e.g. the app was offline for weeks), the
+// call is voided — never graded against a later price.
+function gradeOne(p, series) {
+  const n = closeNearest(series, p.resolveAt);
+  p.resolved = true;
+  p.gradedAt = Date.now();
+  if (!n.withinDay) {
+    Object.assign(p, { void: true, priceAtResolve: null, actualReturn: null, correct: null, brier: null });
+    return;
+  }
+  const ret = ((n.close - p.priceAtCall) / p.priceAtCall) * 100;
+  const correct = judge(p.stance, ret);
+  p.void = false;
+  p.priceAtResolve = n.close;
+  p.actualReturn = +ret.toFixed(2);
+  p.correct = correct;
+  p.brier = +((p.confidence / 100 - (correct ? 1 : 0)) ** 2).toFixed(4);
+}
+
+// Grade all due predictions across all assets (plus a one-time re-check of
+// calls graded before gradedAt existed). Returns count graded.
 export async function gradeDue() {
   const preds = loadPredictions();
-  const due = preds.filter((p) => !p.resolved && p.resolveAt <= Date.now());
-  if (!due.length) return 0;
+  const todo = preds.filter((p) => (!p.resolved && p.resolveAt <= Date.now()) || (p.resolved && !p.gradedAt));
+  if (!todo.length) return 0;
 
-  const assets = [...new Set(due.map((p) => p.asset))];
   const seriesByAsset = {};
-  for (const a of assets) {
+  for (const a of new Set(todo.map((p) => p.asset))) {
     try {
       seriesByAsset[a] = (await fetchSeries(a)).series;
     } catch {
@@ -25,21 +45,10 @@ export async function gradeDue() {
   }
 
   let graded = 0;
-  for (const p of preds) {
-    if (p.resolved || p.resolveAt > Date.now()) continue;
+  for (const p of todo) {
     const series = seriesByAsset[p.asset];
     if (!series) continue;
-    const last = series[series.length - 1];
-    const n = closeNearest(series, p.resolveAt);
-    const priceAtResolve = n.withinDay ? n.close : last.close;
-    const ret = ((priceAtResolve - p.priceAtCall) / p.priceAtCall) * 100;
-    const correct = judge(p.stance, ret);
-    const brier = (p.confidence / 100 - (correct ? 1 : 0)) ** 2;
-    p.resolved = true;
-    p.priceAtResolve = priceAtResolve;
-    p.actualReturn = +ret.toFixed(2);
-    p.correct = correct;
-    p.brier = +brier.toFixed(4);
+    gradeOne(p, series);
     graded++;
   }
   savePredictions(preds);

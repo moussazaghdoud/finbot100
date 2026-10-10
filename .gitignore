@@ -9,6 +9,8 @@ node_modules/
 # runtime data (ephemeral; reseeded on boot)
 app/data/predictions.json
 app/data/user.json
+app/data/fund.json
+app/data/alerts.json
 tracer/data/predictions.json
 
 # temp / artifacts
