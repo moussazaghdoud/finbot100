@@ -18,7 +18,7 @@ server binds `0.0.0.0`, and `/api/config` is the health check).
      (Yahoo Finance blocks datacenter IPs; crypto via Binance always works). Get a
      free key at https://twelvedata.com → sign up → API Keys. Free tier: ~800
      requests/day, plenty for this app (data is cached 15 min and shared).
-   - *(optional)* `ANTHROPIC_MODEL = claude-sonnet-4-6` (or `claude-haiku-4-5-20251001` to cut cost)
+   - *(optional)* `ANTHROPIC_MODEL` — defaults to `claude-haiku-5-5` (cheapest); `claude-sonnet-5-5` reasons better at ~20x the price
 5. **Settings → Networking → Generate Domain** to get a public URL.
 6. Done. The header badge will show `engine: Claude (…)` once the key is set.
 

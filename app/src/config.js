@@ -79,7 +79,9 @@ export const CONFIG = {
     autoOn: process.env.AUTOTRADE !== 'off', // auto-trade on by default
   },
 
-  model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
+  // Haiku 5.5: each analyst call is a short structured answer from a few numbers
+  // and headlines — it handles that at ~1/20th of Sonnet's price.
+  model: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
   hasKey: Boolean(process.env.ANTHROPIC_API_KEY),
   // Hard ceiling on Claude calls per UTC day (7 per asset debate). Past it the
   // analysts fall back to their data-driven rules until midnight UTC.
