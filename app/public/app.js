@@ -120,7 +120,7 @@ function renderSignals(d) {
     <div class="sig-top fade-in">
       <div>
         <h2 class="asset-title">Today's signals</h2>
-        <div class="asset-meta">${count('BUY')} buy · ${count('SELL')} sell · ${count('HOLD')} hold · ${d.horizonDays}-day horizon · updated ${timeAgo(d.ts)}</div>
+        <div class="asset-meta">${count('BUY')} buy · ${count('SELL')} sell · ${count('HOLD')} hold · ${d.horizonDays}-day horizon · analysed ${ok.length ? timeAgo(Math.min(...ok.map((s) => s.ts))) : '—'} · re-analysed every ${state.config.signalsEveryMin} min</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">${bell}<button class="btn ghost" id="sig-refresh">↻ Refresh</button></div>
     </div>

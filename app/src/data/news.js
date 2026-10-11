@@ -2,18 +2,25 @@
 // Also does naive keyword sentiment so SCOUT has something real to chew on.
 const FEEDS = {
   crypto: ['https://cointelegraph.com/rss/tag/bitcoin', 'https://www.coindesk.com/arc/outboundfeeds/rss/'],
-  stock: ['https://feeds.a.dj.com/rss/RSSMarketsMain.xml', 'https://www.cnbc.com/id/100003114/device/rss/rss.html'],
+  stock: ['https://www.cnbc.com/id/100003114/device/rss/rss.html', 'https://www.cnbc.com/id/10001147/device/rss/rss.html'],
 };
 
 const cache = new Map();
 const TTL = 15 * 60 * 1000;
+// Feeds can go stale (WSJ's stopped in Jan 2025) — never pass old news off as current.
+const MAX_AGE_MS = 72 * 3600 * 1000;
+
+const decode = (t) => t.replace(/&apos;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 function parse(xml, max) {
   const items = [];
-  for (const b of xml.split(/<item[\s>]/i).slice(1, max + 1)) {
+  for (const b of xml.split(/<item[\s>]/i).slice(1)) {
     const title = (b.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i) || [])[1];
     const link = (b.match(/<link>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/link>/i) || [])[1];
-    if (title) items.push({ title: title.trim(), link: (link || '').trim() });
+    const date = Date.parse((b.match(/<pubDate>([^<]+)<\/pubDate>/i) || [])[1] || '');
+    if (!title || !(date > Date.now() - MAX_AGE_MS)) continue; // undated or older than 72h
+    items.push({ title: decode(title.trim()), link: (link || '').trim(), date });
+    if (items.length >= max) break;
   }
   return items;
 }
