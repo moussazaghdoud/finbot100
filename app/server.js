@@ -13,6 +13,7 @@ import { getSignals, trackRecord, recentAlerts } from './src/core/signals.js';
 import { loadFund, saveFund, freshFund } from './src/fund/portfolio.js';
 import { startBot, runCycle, status, fundView, beginChallenge } from './src/bot/engine.js';
 import { getEvents } from './src/bot/activity.js';
+import { authEnabled, authMisconfigured, isLoggedIn, login, logoutCookie } from './src/auth.js';
 import { gradeDue } from './src/ledger/grade.js';
 import { scoreboard } from './src/ledger/calibration.js';
 import {
@@ -65,6 +66,7 @@ async function api(req, res, url) {
     if (path === '/api/config') {
       return send(res, 200, {
         llmMode: llmMode(),
+        authEnabled,
         horizonDays: CONFIG.horizonDays,
         neutralBand: CONFIG.neutralBand,
         signalsEveryMin: CONFIG.signals.everyMin,
@@ -168,9 +170,32 @@ async function api(req, res, url) {
   }
 }
 
+// Public without login: the health check, the login page and what it needs.
+const PUBLIC_PATHS = new Set(['/healthz', '/login.html', '/styles.css', '/api/login', '/api/logout']);
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname.startsWith('/api/')) return api(req, res, url);
+  const path = url.pathname;
+  if (path === '/healthz') return send(res, 200, { ok: true });
+  if (path === '/api/login' && req.method === 'POST') {
+    const r = login(req, await readBody(req));
+    if (r.cookie) res.setHeader('set-cookie', r.cookie);
+    return send(res, r.status, r.body);
+  }
+  if (path === '/api/logout' && req.method === 'POST') {
+    res.setHeader('set-cookie', logoutCookie(req));
+    return send(res, 200, { ok: true });
+  }
+  if (!PUBLIC_PATHS.has(path) && !isLoggedIn(req)) {
+    if (path.startsWith('/api/')) return send(res, 401, { error: 'login required' });
+    res.writeHead(302, { location: '/login.html' });
+    return res.end();
+  }
+  if (path === '/login.html' && authEnabled && isLoggedIn(req)) {
+    res.writeHead(302, { location: '/' });
+    return res.end();
+  }
+  if (path.startsWith('/api/')) return api(req, res, url);
   return serveStatic(req, res);
 });
 
@@ -190,6 +215,7 @@ async function warmup() {
 function start() {
   console.log('FinBot 100 — starting…');
   console.log(`  Reasoning engine: ${llmMode()}`);
+  console.log(`  Login: ${authEnabled ? 'required' : authMisconfigured ? 'MISCONFIGURED — AUTH_EMAIL set but no AUTH_PASSWORD_HASH / AUTH_PASSWORD; app is locked' : 'off (set AUTH_EMAIL + AUTH_PASSWORD_HASH to require it)'}`);
   server.on('error', (e) => {
     console.error(`  Server error: ${e.code === 'EADDRINUSE' ? `port ${CONFIG.port} is already in use — set PORT to a free port` : e.message}`);
     process.exit(1);

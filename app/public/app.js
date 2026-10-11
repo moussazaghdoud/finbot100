@@ -1,6 +1,10 @@
 // FinBot 100 frontend — vanilla JS. Views: Signals, Council, Fund, Ledger (Universe map hidden for now).
 const $ = (s) => document.querySelector(s);
-const api = (p, opts) => fetch(p, opts).then((r) => r.json());
+const api = (p, opts) =>
+  fetch(p, opts).then((r) => {
+    if (r.status === 401) location.replace('/login.html' + location.hash);
+    return r.json();
+  });
 const fmtPrice = (n) => (n >= 1000 ? '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '$' + n.toFixed(2));
 const sign = (n) => (n > 0 ? '+' : '') + n + '%';
 const cls = (n) => (n > 0 ? 'up' : n < 0 ? 'down' : '');
@@ -13,6 +17,8 @@ async function boot() {
   state.agents = state.config.agents;
   $('#llm-badge').innerHTML = 'engine: <b>' + state.config.llmMode + '</b>';
   setupNav();
+  if (state.config.authEnabled) $('#logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.replace('/login.html'); };
+  else $('#logout').remove();
   refreshCapital();
   startAlertWatch();
   refreshPill();

@@ -6,7 +6,8 @@
   "description": "FinBot 100 — educational financial-intelligence platform. Living market map + 6-agent Analyst Council + Accountability Ledger + You-vs-Council. Zero-dependency demo (optional Claude).",
   "scripts": {
     "start": "node server.js",
-    "grade": "node src/commands/grade.js"
+    "grade": "node src/commands/grade.js",
+    "hash-password": "node src/commands/hash-password.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1"
