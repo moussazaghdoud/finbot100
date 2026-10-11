@@ -8,3 +8,4 @@ _edge_err.txt
 data/alerts.json
 data/activity.json
 data/fund.legacy-*.json
+data/claude-usage.json

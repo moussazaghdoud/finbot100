@@ -56,6 +56,7 @@ export const CONFIG = {
   fundFile: join(DATA_DIR, 'fund.json'),
   alertsFile: join(DATA_DIR, 'alerts.json'),
   activityFile: join(DATA_DIR, 'activity.json'),
+  usageFile: join(DATA_DIR, 'claude-usage.json'),
 
   // BUY / SELL / HOLD thresholds on the Council signal (-1..+1).
   signals: {

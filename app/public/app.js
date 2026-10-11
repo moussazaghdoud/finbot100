@@ -581,6 +581,7 @@ function renderBotStatus() {
     <div style="flex:1">
       <div class="bs-text">${i.text}</div>
       <div class="bs-sub">${s ? `${claudeState(s.claude).text} · a cycle every ${s.everyMin} min · server up ${fmtIn(s.uptimeSec * 1000)}${s.lastError ? ` · <span class="down">last error: ${esc(s.lastError)}</span>` : ''}` : 'Start it with npm start (or check Railway).'}</div>
+      ${s?.claude?.enabled ? `<div class="bs-sub">💰 Claude cost: <b>${spendLine(s.claude)}</b></div>` : ''}
       ${p && p.n ? `<div class="bs-bar"><i style="width:${Math.round(((p.step === 'deciding' ? p.n : Math.max(0, p.i - 1)) / p.n) * 100)}%"></i></div>` : ''}
     </div>
     <button class="btn ghost" id="run-cycle" ${s?.phase === 'thinking' ? 'disabled' : ''}>▸ Run a cycle now</button>`;
@@ -754,11 +755,16 @@ async function refreshPill() {
 // Engine badge: says whether Claude is actually answering, not just configured.
 function claudeState(c) {
   if (!c?.enabled) return { cls: '', text: 'engine: <b>rules only</b> (no Claude key)', tip: 'No ANTHROPIC_API_KEY set — analysts use built-in rules. No Claude calls, no cost.' };
-  const cost = `${c.estCostUsd.toFixed(2)} today`;
+  const cost = `$${c.estCostUsd.toFixed(2)} today`;
   if (c.capped) return { cls: 'late', text: `Claude: <b>daily cap reached</b> · ${cost}`, tip: `${c.calls}/${c.cap} calls used today — rules until midnight UTC.` };
   if (c.failed && !c.ok) return { cls: 'stopped', text: 'Claude: <b>failing</b> — rules used', tip: `All ${c.failed} calls today failed: ${c.lastError}` };
   if (!c.calls) return { cls: '', text: `Claude: <b>${esc(c.model)}</b> · no calls yet today`, tip: 'Key set; waiting for the next cycle.' };
   return { cls: c.failed ? 'late' : 'live', text: `Claude ✓ <b>${c.ok}</b> ok${c.failed ? ` · ${c.failed} failed` : ''} · ${cost}`, tip: `${esc(c.model)} · ${c.inTok} in / ${c.outTok} out tokens today${c.lastError ? ' · last error: ' + c.lastError : ''}` };
+}
+function spendLine(c) {
+  const usd = (n) => '$' + n.toFixed(2);
+  return `${usd(c.estCostUsd)} today · ${usd(c.monthUsd)} this month · ${usd(c.totalUsd)} total` +
+    (c.perDayUsd != null ? ` · ≈ ${usd(c.perDayUsd)}/day, ${usd(c.perDayUsd * 7)}/week at this pace` : '');
 }
 function renderEngineBadge(c) {
   const st = claudeState(c);

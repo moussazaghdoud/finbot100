@@ -18,3 +18,4 @@ tracer/data/predictions.json
 **/_edge_err.txt
 app/data/activity.json
 app/data/fund.legacy-*.json
+app/data/claude-usage.json

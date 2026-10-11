@@ -1,4 +1,5 @@
 import { CONFIG } from '../config.js';
+import { readJson, writeJson } from '../ledger/store.js';
 
 let clientPromise = null;
 async function getClient() {
@@ -24,9 +25,28 @@ const PRICE = { // $ per 1M tokens (input, output)
   'claude-opus-5-5': [4, 20],
 };
 const usage = { day: '', calls: 0, ok: 0, failed: 0, capped: 0, inTok: 0, outTok: 0, lastError: null, lastErrorAt: null, lastOkAt: null, keyRejected: false };
+
+// Spend ledger persisted per UTC day (survives restarts, so totals and the
+// daily cap stay right): { days: { 'YYYY-MM-DD': { calls, inTok, outTok, usd } } }
+const spend = readJson(CONFIG.usageFile, { days: {} });
+function record(inTok, outTok) {
+  const [pi, po] = PRICE[CONFIG.model] || [0, 0];
+  const d = (spend.days[usage.day] ||= { calls: 0, inTok: 0, outTok: 0, usd: 0 });
+  d.calls++;
+  d.inTok += inTok;
+  d.outTok += outTok;
+  d.usd = +(d.usd + (inTok * pi + outTok * po) / 1e6).toFixed(6);
+  usage.inTok += inTok;
+  usage.outTok += outTok;
+  writeJson(CONFIG.usageFile, spend);
+}
+
 function today() {
   const d = new Date().toISOString().slice(0, 10);
-  if (usage.day !== d) Object.assign(usage, { day: d, calls: 0, ok: 0, failed: 0, capped: 0, inTok: 0, outTok: 0 });
+  if (usage.day !== d) {
+    const saved = spend.days[d] || {};
+    Object.assign(usage, { day: d, calls: saved.calls || 0, ok: 0, failed: 0, capped: 0, inTok: saved.inTok || 0, outTok: saved.outTok || 0 });
+  }
 }
 function noteFailure(msg) {
   usage.failed++;
@@ -37,13 +57,17 @@ function noteFailure(msg) {
 
 export function llmUsage() {
   today();
-  const [pi, po] = PRICE[CONFIG.model] || [0, 0];
+  const month = usage.day.slice(0, 7);
+  const sum = (pred) => +Object.entries(spend.days).filter(([k]) => pred(k)).reduce((s, [, v]) => s + v.usd, 0).toFixed(4);
   return {
     ...usage,
     model: CONFIG.model,
     enabled: CONFIG.hasKey,
     cap: CONFIG.maxClaudeCallsPerDay,
-    estCostUsd: +((usage.inTok * pi + usage.outTok * po) / 1e6).toFixed(4),
+    estCostUsd: sum((k) => k === usage.day),
+    monthUsd: sum((k) => k.startsWith(month)),
+    totalUsd: sum(() => true),
+    since: Object.keys(spend.days).sort()[0] || null,
   };
 }
 
@@ -80,8 +104,7 @@ export async function askClaudeJson(system, user) {
       system,
       messages: [{ role: 'user', content: user }],
     });
-    usage.inTok += msg.usage?.input_tokens || 0;
-    usage.outTok += msg.usage?.output_tokens || 0;
+    record(msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0);
     if (msg.stop_reason !== 'end_turn') {
       noteFailure(`stop_reason ${msg.stop_reason}`);
       return null;

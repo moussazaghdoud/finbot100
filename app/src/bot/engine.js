@@ -12,7 +12,7 @@ import { logEvent, getEvents } from './activity.js';
 
 const EVERY_MS = Math.max(5, CONFIG.signals.everyMin) * 60000;
 const bootAt = Date.now();
-const state = { phase: 'idle', progress: null, lastRunAt: null, nextRunAt: null, lastError: null };
+const state = { phase: 'idle', progress: null, lastRunAt: null, nextRunAt: null, lastError: null, lastPaidCycleUsd: null };
 
 const eur = (n) => '€' + n.toFixed(2);
 const pct = (n) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
@@ -30,7 +30,7 @@ export function status() {
     nextRunAt: state.nextRunAt,
     everyMin: CONFIG.signals.everyMin,
     engine: llmMode(),
-    claude: llmUsage(),
+    claude: { ...llmUsage(), perDayUsd: state.lastPaidCycleUsd == null ? null : +(state.lastPaidCycleUsd * (1440 / CONFIG.signals.everyMin)).toFixed(2) },
     uptimeSec: Math.round((now - bootAt) / 1000),
     lastError: state.lastError,
     now,
@@ -72,6 +72,7 @@ export async function runCycle({ reason = 'scheduled' } = {}) {
   state.phase = 'thinking';
   state.progress = { i: 0, n: CONFIG.universe.length, asset: null, step: 'analysing' };
   const cycle = Date.now().toString(36);
+  const usdBefore = llmUsage().totalUsd;
   try {
     // Gap detection: was the bot offline since its last cycle?
     const lastCycle = getEvents({ limit: 3000 }).filter((e) => e.type === 'cycle').pop();
@@ -131,6 +132,8 @@ export async function runCycle({ reason = 'scheduled' } = {}) {
     logEvent('error', `Cycle failed: ${e.message}`, { cycle });
     return { error: e.message };
   } finally {
+    const cycleUsd = llmUsage().totalUsd - usdBefore;
+    if (cycleUsd > 0) state.lastPaidCycleUsd = cycleUsd; // cached cycles cost 0 — keep the last real one
     state.phase = 'idle';
     state.progress = null;
     state.lastRunAt = Date.now();
