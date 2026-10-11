@@ -84,7 +84,12 @@ function extractJson(t) {
 
 // One short JSON answer. Low effort keeps the model's reasoning (billed as
 // output) small; max_tokens leaves room for that reasoning plus the JSON.
-export async function askClaudeJson(system, user) {
+// Structured outputs make the API guarantee schema-valid JSON. If the API ever
+// rejects a schema, that request is retried once without it and schemas are
+// switched off for the rest of the process (prompt-only JSON, parsed leniently).
+let schemasOff = false;
+
+export async function askClaudeJson(system, user, schema = null) {
   const client = await getClient();
   if (!client) return null;
   today();
@@ -96,22 +101,38 @@ export async function askClaudeJson(system, user) {
     return null;
   }
   usage.calls++;
-  try {
-    const msg = await client.messages.create({
+  const create = (withSchema) =>
+    client.messages.create({
       model: CONFIG.model,
       max_tokens: 4000,
-      output_config: { effort: 'low' },
+      output_config: withSchema ? { effort: 'low', format: { type: 'json_schema', schema } } : { effort: 'low' },
       system,
       messages: [{ role: 'user', content: user }],
     });
+  try {
+    let msg;
+    try {
+      msg = await create(Boolean(schema) && !schemasOff);
+    } catch (e) {
+      if (!(schema && !schemasOff && e.status === 400)) throw e;
+      schemasOff = true;
+      console.warn(`  [claude] structured output rejected (${e.error?.error?.message || e.message}) — continuing without schemas`);
+      msg = await create(false);
+    }
     record(msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0);
     if (msg.stop_reason !== 'end_turn') {
       noteFailure(`stop_reason ${msg.stop_reason}`);
       return null;
     }
-    const json = extractJson(msg.content.map((c) => (c.type === 'text' ? c.text : '')).join(''));
+    const text = msg.content.map((c) => (c.type === 'text' ? c.text : '')).join('');
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = extractJson(text);
+    }
     if (!json) {
-      noteFailure('reply had no JSON');
+      noteFailure(`reply had no JSON (starts: ${text.slice(0, 60).replace(/\s+/g, ' ')})`);
       return null;
     }
     usage.ok++;

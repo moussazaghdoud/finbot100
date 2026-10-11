@@ -14,6 +14,16 @@ You cannot create new trades or change a HOLD. If the trades look sensible toget
 
 Respond with ONLY this JSON: {"vetoes":[{"asset":"TICKER","reason":"one sentence"}],"summary":"1-2 sentences on the portfolio as a whole"}`;
 
+const PM_SCHEMA = {
+  type: 'object',
+  properties: {
+    vetoes: { type: 'array', items: { type: 'object', properties: { asset: { type: 'string' }, reason: { type: 'string' } }, required: ['asset', 'reason'], additionalProperties: false } },
+    summary: { type: 'string' },
+  },
+  required: ['vetoes', 'summary'],
+  additionalProperties: false,
+};
+
 export async function runPortfolioManager({ fund, signals }) {
   const trades = signals.filter((s) => s.action !== 'HOLD');
   if (!trades.length) return null;
@@ -24,7 +34,7 @@ export async function runPortfolioManager({ fund, signals }) {
     'Council decisions this cycle:',
     ...signals.map((s) => `${s.asset} (${s.sector}): ${s.action}, conviction ${s.strength} — ${String(s.reason || '').slice(0, 220)}`),
   ];
-  const out = await askClaudeJson(SYS, lines.join('\n'));
+  const out = await askClaudeJson(SYS, lines.join('\n'), PM_SCHEMA);
   if (!out) return null;
   const allowed = new Set(trades.map((s) => s.asset));
   const vetoes = (Array.isArray(out.vetoes) ? out.vetoes : [])

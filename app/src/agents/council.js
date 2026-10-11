@@ -196,8 +196,20 @@ Respond with ONLY this JSON, no prose before or after:
 const ORDER = ['SAGE', 'ORACLE', 'SCOUT', 'SENTINEL', 'ATLAS', 'ALCHEMIST'];
 const ACTIONS = ['BUY', 'SELL', 'HOLD'];
 
+// JSON schema for structured outputs: the API guarantees the reply matches it.
+const obj = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+const str = { type: 'string' };
+const COUNCIL_SCHEMA = obj({
+  analysts: {
+    type: 'array',
+    items: obj({ agent: { type: 'string', enum: ORDER }, stance: { type: 'string', enum: ['bullish', 'bearish', 'neutral'] }, confidence: { type: 'integer' }, thesis: str, catalyst: str, keyRisk: str }),
+  },
+  decision: obj({ action: { type: 'string', enum: ACTIONS }, conviction: { type: 'integer' }, reasoning: str, keyDrivers: { type: 'array', items: str }, risks: str, changeMind: str }),
+  summary: obj({ agreement: { type: 'string', enum: ['agree', 'partial', 'disagree'] }, bullCase: str, bearCase: str }),
+});
+
 export async function runCouncilClaude(dossierText, horizonDays) {
-  const out = await askClaudeJson(COUNCIL_SYS(horizonDays), `DOSSIER\n\n${dossierText}\n\nDeliberate and decide.`);
+  const out = await askClaudeJson(COUNCIL_SYS(horizonDays), `DOSSIER\n\n${dossierText}\n\nDeliberate and decide.`, COUNCIL_SCHEMA);
   if (!out || !Array.isArray(out.analysts)) return null;
   const byAgent = Object.fromEntries(out.analysts.map((a) => [String(a.agent || '').toUpperCase(), a]));
   if (!ORDER.every((a) => byAgent[a])) return null;
