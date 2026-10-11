@@ -7,8 +7,12 @@
 import { scryptSync, randomBytes, timingSafeEqual, createHmac, createHash } from 'node:crypto';
 
 const EMAIL = (process.env.AUTH_EMAIL || '').trim().toLowerCase();
-const HASH = process.env.AUTH_PASSWORD_HASH || '';
-const PLAIN = process.env.AUTH_PASSWORD || '';
+const rawHash = (process.env.AUTH_PASSWORD_HASH || '').trim();
+// A plain password typed into AUTH_PASSWORD_HASH by mistake is used as-is
+// rather than locking the owner out.
+const HASH = rawHash.startsWith('scrypt$') ? rawHash : '';
+const PLAIN = process.env.AUTH_PASSWORD || (rawHash && !HASH ? rawHash : '');
+if (rawHash && !HASH) console.warn('  AUTH_PASSWORD_HASH is not a scrypt$ hash — treating it as the plain password. Run `npm run hash-password` to store a hash instead.');
 const SECRET = process.env.SESSION_SECRET || createHash('sha256').update('finbot100|' + EMAIL + '|' + (HASH || PLAIN)).digest('hex');
 const COOKIE = 'fb_session';
 const MAX_AGE_S = 30 * 86400;
