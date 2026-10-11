@@ -158,3 +158,64 @@ function alchemistMock(ev, ctx) {
 }
 export const runAlchemist = (ev, ctx) =>
   run('ALCHEMIST', ALCH_SYS, `Evidence:\n${evidenceText(ev, ctx)}\nCouncil so far: ${(ctx.council || []).map((t) => `${t.agent}:${t.stance}`).join(', ')}\n\nGive your portfolio thesis.`, alchemistMock(ev, ctx));
+
+// ── Rules-only council (no Claude) — used when Claude is off, fails or is capped.
+export function rulesCouncil(ev, ctx) {
+  const partial = [
+    ['SAGE', sageMock(ev, ctx)], ['ORACLE', oracleMock(ev)], ['SCOUT', scoutMock(ev, ctx)],
+    ['SENTINEL', sentinelMock(ev, ctx)], ['ATLAS', atlasMock(ev)],
+  ].map(([a, m]) => ({ ...normalizeThesis(a, m), via: 'rules' }));
+  const alch = { ...normalizeThesis('ALCHEMIST', alchemistMock(ev, { ...ctx, council: partial })), via: 'rules' };
+  return [...partial, alch];
+}
+
+// ── The Claude council: ONE call per asset. Six lenses + a chair's decision,
+// all grounded in the asset's dossier (see core/dossier.js).
+const COUNCIL_SYS = (h) => `You are the FinBot Council: six analysts and a chair who decide BUY, SELL or HOLD for one asset over the next ${h} days, for a virtual paper-trading fund. You receive a dossier of real, current data.
+
+Each analyst gives an independent view through their own lens — they may disagree:
+- SAGE (macro economist): interest rates, yield curve, dollar, VIX, risk regime, and how this asset typically reacts to them.
+- ORACLE (momentum & technicals): trend, moving averages, RSI, MACD, volume, recent price action.
+- SCOUT (news): what the asset-specific headlines actually say, whether they matter and whether they are already priced in. Ignore irrelevant or promotional headlines (e.g. fund filings).
+- SENTINEL (geopolitics & policy): conflicts, sanctions, tariffs, regulation, central banks, elections — from the headlines and macro.
+- ATLAS (risk manager, the skeptic): volatility, overextension, distance from highs, earnings or events inside the horizon, correlation with weak related assets. Argue the strongest counter-case.
+- ALCHEMIST (fundamentals & relative value): valuation, growth and analyst targets for stocks; for crypto, Fear & Greed and how it is moving versus its related assets.
+Then the CHAIR weighs the six views and decides.
+
+Rules:
+- Ground every claim in the dossier's numbers or headlines (cite them, e.g. "RSI 72", "[N3]"). Invent nothing. If something is missing, say so.
+- Analyst confidence 50-90 = calibrated probability the stance is right over the horizon (bullish = price up more than 0.5%, bearish = down more than 0.5%, neutral = within ±1.5%).
+- The chair chooses BUY only with a clear edge, SELL when the downside case is clearly stronger (SELL means exit if held — no short selling), otherwise HOLD. Weak or mixed evidence means HOLD. An earnings date or major scheduled event inside the horizon raises the bar.
+- Conviction 0-100 = strength of the chair's decision (50 = marginal, 80+ = strong).
+
+Respond with ONLY this JSON, no prose before or after:
+{"analysts":[{"agent":"SAGE","stance":"bullish|bearish|neutral","confidence":50,"thesis":"1-2 sentences citing the data","catalyst":"what would confirm it","keyRisk":"what would break it"}, ...one object for each of SAGE, ORACLE, SCOUT, SENTINEL, ATLAS, ALCHEMIST in that order],
+ "decision":{"action":"BUY|SELL|HOLD","conviction":0,"reasoning":"2-3 sentences: why this action now","keyDrivers":["short phrase","short phrase"],"risks":"the main risk to this decision","changeMind":"what would make the council reverse"},
+ "summary":{"agreement":"agree|partial|disagree","bullCase":"strongest bull point","bearCase":"strongest bear point"}}`;
+
+const ORDER = ['SAGE', 'ORACLE', 'SCOUT', 'SENTINEL', 'ATLAS', 'ALCHEMIST'];
+const ACTIONS = ['BUY', 'SELL', 'HOLD'];
+
+export async function runCouncilClaude(dossierText, horizonDays) {
+  const out = await askClaudeJson(COUNCIL_SYS(horizonDays), `DOSSIER\n\n${dossierText}\n\nDeliberate and decide.`);
+  if (!out || !Array.isArray(out.analysts)) return null;
+  const byAgent = Object.fromEntries(out.analysts.map((a) => [String(a.agent || '').toUpperCase(), a]));
+  if (!ORDER.every((a) => byAgent[a])) return null;
+  const d = out.decision || {};
+  const action = String(d.action || '').toUpperCase();
+  if (!ACTIONS.includes(action)) return null;
+  const theses = ORDER.map((a) => ({ ...normalizeThesis(a, byAgent[a]), via: 'claude' }));
+  const s = out.summary || {};
+  return {
+    theses,
+    decision: {
+      action,
+      conviction: Math.max(0, Math.min(100, Math.round(Number(d.conviction) || 0))),
+      reasoning: String(d.reasoning || '').trim(),
+      keyDrivers: Array.isArray(d.keyDrivers) ? d.keyDrivers.slice(0, 5).map(String) : [],
+      risks: String(d.risks || '').trim(),
+      changeMind: String(d.changeMind || '').trim(),
+    },
+    summary: { agreement: ['agree', 'partial', 'disagree'].includes(s.agreement) ? s.agreement : 'partial', bullCase: String(s.bullCase || 'none raised'), bearCase: String(s.bearCase || 'none raised') },
+  };
+}

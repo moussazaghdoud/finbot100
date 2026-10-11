@@ -28,7 +28,7 @@ export async function seedHistoryIfEmpty() {
         continue;
       }
       // Need ~30 bars of look-back for the evidence, and the horizon must have passed.
-      for (let i = 30; i <= series.length - 1 - CONFIG.horizonDays; i++) {
+      for (let i = Math.max(30, series.length - 1 - CONFIG.horizonDays - 70); i <= series.length - 1 - CONFIG.horizonDays; i++) {
         const createdAt = series[i].t;
         if (have.has(meta.id + '|' + new Date(createdAt).toDateString())) continue;
         const ev = buildEvidence(meta, series, i);

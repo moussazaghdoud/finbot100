@@ -55,3 +55,38 @@ export async function fetchNews(kind = 'crypto', max = 6) {
   }
   return [];
 }
+
+// Headlines about ONE asset (last 72h): Yahoo Finance's per-ticker feed for
+// stocks/ETFs, Google News search for everything. Merged, newest first, deduped.
+const assetCache = new Map();
+const QUERY = {
+  BTC: 'Bitcoin', ETH: 'Ethereum', SOL: 'Solana crypto', BNB: 'BNB Binance coin', XRP: 'XRP Ripple',
+  DOGE: 'Dogecoin', ADA: 'Cardano ADA', SPY: 'S&P 500', GLD: 'gold price',
+};
+
+export async function assetNews(meta, max = 8) {
+  const c = assetCache.get(meta.id);
+  if (c && Date.now() - c.ts < TTL * 2) return c.items;
+  const q = QUERY[meta.id] || `${meta.name} ${meta.id} stock`;
+  const feeds = [`https://news.google.com/rss/search?q=${encodeURIComponent(q)}+when:3d&hl=en-US&gl=US&ceid=US:en`];
+  if (meta.kind === 'stock') feeds.unshift(`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${meta.id}&region=US&lang=en-US`);
+  const all = [];
+  await Promise.all(feeds.map(async (f) => {
+    try {
+      const r = await fetch(f, { headers: { 'user-agent': 'Mozilla/5.0 (finbot100)' } });
+      if (r.ok) all.push(...parse(await r.text(), 15));
+    } catch { /* source down: use the other */ }
+  }));
+  // Keep stock headlines that actually name the company (Yahoo's ticker feed
+  // mixes in general market stories); fall back to the rest if none do.
+  const words = meta.kind === 'stock' && !['SPY', 'GLD'].includes(meta.id) ? [meta.id.toLowerCase(), meta.name.toLowerCase().split(' ')[0]] : null;
+  const named = words ? all.filter((it) => words.some((w) => it.title.toLowerCase().includes(w))) : all;
+  const pool = named.length >= 3 ? named : all;
+  const seen = new Set();
+  const items = pool
+    .sort((a, b) => (named.includes(b) - named.includes(a)) || b.date - a.date)
+    .filter((it) => { const k = it.title.toLowerCase().slice(0, 60); if (seen.has(k)) return false; seen.add(k); return true; })
+    .slice(0, max);
+  if (items.length) assetCache.set(meta.id, { items, ts: Date.now() });
+  return items;
+}

@@ -1,10 +1,11 @@
 // Unified market data: crypto via Binance/CoinGecko (keyless), stocks/ETFs via
-// Stooq CSV (keyless). Returns a daily-close series per asset. All real data.
+// Twelve Data (key) or Yahoo. Returns a daily series per asset. All real data.
 import { CONFIG, assetById } from '../config.js';
 
 const DAY_MS = 86400000;
 const cache = new Map(); // id -> { series, source, ts }
 const TTL = 15 * 60 * 1000;
+const STOCK_TTL = 60 * 60 * 1000; // daily bars: hourly refresh is plenty and spares the stock-API quota
 // Binance blocks some cloud regions on api.binance.com; data-api.binance.vision is
 // its public market-data mirror and is reachable from them.
 const BINANCE_HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com'];
@@ -21,11 +22,11 @@ async function binanceGet(path) {
   }
   throw last;
 }
-const HISTORY = 100; // daily bars kept: enough to grade calls and backtest ~2 months
+const HISTORY = 250; // daily bars kept: ~1 year, enough for the 200-day average and grading
 
 async function binanceDaily(symbol, limit = HISTORY) {
   const rows = await binanceGet(`/api/v3/klines?symbol=${symbol}&interval=1d&limit=${limit}`);
-  return rows.map((x) => ({ t: x[0], close: +x[4], high: +x[2], low: +x[3] }));
+  return rows.map((x) => ({ t: x[0], close: +x[4], high: +x[2], low: +x[3], volume: +x[7] })); // quote volume (USD)
 }
 
 async function coingeckoDaily(id, days = HISTORY) {
@@ -41,7 +42,7 @@ async function coingeckoDaily(id, days = HISTORY) {
 }
 
 async function yahooDaily(symbol) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=6mo&interval=1d`;
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=1d`;
   const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (finbot100)' } });
   if (!r.ok) throw new Error(`Yahoo ${r.status}`);
   const j = await r.json();
@@ -49,9 +50,18 @@ async function yahooDaily(symbol) {
   if (!res?.timestamp) throw new Error('Yahoo: no data');
   const q = res.indicators.quote[0];
   const rows = res.timestamp
-    .map((ts, i) => ({ t: ts * 1000, close: q.close[i], high: q.high[i], low: q.low[i] }))
+    .map((ts, i) => ({ t: ts * 1000, close: q.close[i], high: q.high[i], low: q.low[i], volume: q.volume?.[i] ?? null }))
     .filter((x) => x.close != null);
   return rows.slice(-HISTORY);
+}
+
+// Index levels (e.g. ^VIX) — Yahoo only; callers treat failure as 'unavailable'.
+export async function indexSeries(symbol) {
+  const c = cache.get(symbol);
+  if (c && Date.now() - c.ts < STOCK_TTL) return c.series;
+  const series = await yahooDaily(encodeURIComponent(symbol));
+  cache.set(symbol, { series, source: 'Yahoo', ts: Date.now() });
+  return series;
 }
 
 async function twelveDataDaily(symbol, key) {
@@ -62,7 +72,7 @@ async function twelveDataDaily(symbol, key) {
   if (j.status === 'error' || !Array.isArray(j.values)) throw new Error(`TwelveData: ${j.message || 'no data'}`);
   // values are newest-first — reverse to oldest-first
   return j.values
-    .map((v) => ({ t: new Date(v.datetime).getTime(), close: +v.close, high: +v.high, low: +v.low }))
+    .map((v) => ({ t: new Date(v.datetime).getTime(), close: +v.close, high: +v.high, low: +v.low, volume: v.volume != null ? +v.volume : null }))
     .filter((x) => Number.isFinite(x.close))
     .reverse()
     .slice(-HISTORY);
@@ -103,14 +113,17 @@ async function stockQuote(id) {
 }
 
 export async function getSpot(id) {
-  const c = spotCache.get(id);
-  if (c && Date.now() - c.ts < SPOT_TTL) return c.p;
   const meta = assetById(id);
+  const c = spotCache.get(id);
+  // Stocks: quotes cost stock-API quota, so refresh every 10 min, and not at all
+  // while the US market is closed (the last close is the price then).
+  const ttl = meta.kind === 'crypto' ? SPOT_TTL : 10 * SPOT_TTL;
+  if (c && Date.now() - c.ts < ttl) return c.p;
   let p = null;
   try {
     if (meta.kind === 'crypto') {
       p = Number((await binanceGet(`/api/v3/ticker/price?symbol=${id}USDT`)).price) || null;
-    } else {
+    } else if (usMarketOpen()) {
       p = await stockQuote(id);
     }
   } catch {
@@ -153,24 +166,30 @@ export function usMarketOpen(now = new Date()) {
 }
 
 export async function fetchSeries(id) {
-  const cached = cache.get(id);
-  if (cached && Date.now() - cached.ts < TTL) return cached;
-
   const meta = assetById(id);
+  const cached = cache.get(id);
+  if (cached && Date.now() - cached.ts < (meta.kind === 'crypto' ? TTL : STOCK_TTL)) return cached;
+
   let series, source;
-  if (meta.kind === 'crypto') {
-    try {
-      series = await binanceDaily(`${id}USDT`);
-      source = 'Binance';
-    } catch {
-      series = await coingeckoDaily(id);
-      source = 'CoinGecko';
+  try {
+    if (meta.kind === 'crypto') {
+      try {
+        series = await binanceDaily(`${id}USDT`);
+        source = 'Binance';
+      } catch {
+        series = await coingeckoDaily(id);
+        source = 'CoinGecko';
+      }
+    } else {
+      series = await stockDaily(id);
+      source = CONFIG.stockApiKey ? 'TwelveData' : 'Yahoo';
     }
-  } else {
-    series = await stockDaily(id);
-    source = CONFIG.stockApiKey ? 'TwelveData' : 'Yahoo';
+    if (!series?.length) throw new Error(`No data for ${id}`);
+  } catch (e) {
+    // A source blip shouldn't drop the asset: reuse the last series we had.
+    if (cached) return { ...cached, source: `${cached.source} (cached ${Math.round((Date.now() - cached.ts) / 60000)} min ago)` };
+    throw new Error(`${id} prices: ${e.message}${e.cause?.code ? ` (${e.cause.code})` : ''}`);
   }
-  if (!series?.length) throw new Error(`No data for ${id}`);
   const out = { series, source, ts: Date.now() };
   cache.set(id, out);
   return out;

@@ -5,13 +5,13 @@ const SYS = `You are the MODERATOR of an educational analyst debate. You never g
 never tell anyone what to buy or sell. Summarize neutrally. Respond ONLY JSON:
 {"agreement":"agree"|"disagree"|"partial","summary":"1-2 neutral sentences","bullCase":"strongest bull point or 'none raised'","bearCase":"strongest bear point or 'none raised'","residualUncertainty":"the key open question"}`;
 
-function tally(theses) {
+export function tally(theses) {
   const b = theses.filter((t) => t.stance === 'bullish').length;
   const r = theses.filter((t) => t.stance === 'bearish').length;
   return { b, r };
 }
 
-function mock(theses) {
+export function mockModerator(theses) {
   const { b, r } = tally(theses);
   const agreement = b && r ? 'disagree' : b || r ? (b + r >= theses.length - 1 ? 'agree' : 'partial') : 'partial';
   const bull = theses.filter((t) => t.stance === 'bullish').sort((a, c) => c.confidence - a.confidence)[0];
@@ -27,6 +27,6 @@ function mock(theses) {
 
 export async function runModerator(theses) {
   const user = theses.map((t) => `${t.agent} (${t.stance}, ${t.confidence}%): ${t.thesis}`).join('\n') + '\n\nSummarize the debate.';
-  const out = (await askClaudeJson(SYS, user)) || mock(theses);
+  const out = (await askClaudeJson(SYS, user)) || mockModerator(theses);
   return { ...out, tally: tally(theses) };
 }

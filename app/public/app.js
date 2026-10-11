@@ -104,7 +104,7 @@ function renderSignals(d) {
   const count = (a) => ok.filter((s) => s.action === a).length;
   const rows = d.signals
     .map((s) => {
-      if (s.error) return `<div class="sig-row"><div class="sig-asset"><b>${s.asset}</b><span>${s.name}</span></div><div class="sig-reason" style="color:var(--dim)">no data: ${s.error}</div></div>`;
+      if (s.error) return `<div class="sig-row"><div class="sig-asset"><b>${s.asset}</b><span>${s.name}</span></div><div class="sig-reason" style="color:var(--dim)">no data: ${esc(s.error)}</div></div>`;
       const rec = d.track.byAsset[s.asset];
       return `
       <div class="sig-row" data-asset="${s.asset}">
@@ -114,7 +114,7 @@ function renderSignals(d) {
         <div class="sig-num numeric">${s.strength}<span>strength</span></div>
         <div class="sig-num numeric">${s.votes.bull}↑ ${s.votes.bear}↓<span>analysts</span></div>
         <div class="sig-num numeric">${rec ? `${rec.hits}/${rec.n}` : '—'}<span>right here</span></div>
-        <div class="sig-reason">${s.reason}<div class="sig-risk">Risk: ${s.risk}</div></div>
+        <div class="sig-reason">${s.via === 'claude' ? '<span class="track-tag">Claude</span> ' : ''}${esc(s.reason)}<div class="sig-risk">Risk: ${esc(s.risk)}</div></div>
       </div>`;
     })
     .join('');
@@ -345,6 +345,59 @@ function sparkline(series) {
     <polyline fill="none" stroke="${c}" stroke-width="1.8" points="${pts.join(' ')}"/></svg>`;
 }
 
+const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '')) ? esc(u) : '#');
+const n2 = (v, unit = '') => (v == null ? '—' : `${v}${unit}`);
+
+function decisionPanel(b) {
+  const d = b.decision;
+  if (!d) return `<div class="decision panel fade-in"><div class="track-sub">Decided by the built-in rules (Claude off or unavailable) — no chair's reasoning for this asset.</div></div>`;
+  return `<div class="decision panel fade-in">
+    <div class="dec-h"><span class="sig-action ${d.action.toLowerCase()}">${d.action}</span>
+      <div><div class="fh-label">The council's decision · next ${b.horizonDays} days</div><div class="dec-conv">conviction <b>${d.conviction}</b>/100</div></div></div>
+    <div class="dec-why">${esc(d.reasoning)}</div>
+    ${d.keyDrivers?.length ? `<div class="dec-tags">${d.keyDrivers.map((k) => `<span>${esc(k)}</span>`).join('')}</div>` : ''}
+    <div class="bullbear" style="margin-top:12px">
+      <div><div class="lbl down">Main risk</div>${esc(d.risks)}</div>
+      <div><div class="lbl" style="color:var(--yellow)">Would change its mind if</div>${esc(d.changeMind)}</div>
+    </div>
+  </div>`;
+}
+
+function dossierPanel(b) {
+  const x = b.dossier;
+  if (!x) return '';
+  const t = x.tech, m = b.macro || {}, f = x.fundamentals;
+  const row = (k, v) => `<div class="dz-row"><span>${k}</span><b class="numeric">${v}</b></div>`;
+  const col = (title, rows) => `<div class="dz-col"><div class="track-sub" style="margin-bottom:6px">${title}</div>${rows.join('')}</div>`;
+  const tech = col('Technicals', [
+    row('RSI (14)', n2(t.rsi14)), row('vs 20-day avg', n2(t.vsSma20, '%')), row('vs 50-day avg', n2(t.vsSma50, '%')), row('vs 200-day avg', n2(t.vsSma200, '%')),
+    row('MACD histogram', n2(t.macdHistPct, '%')), row('from 52-week high', n2(t.from52wHigh, '%')), row('volume 5d / 20d', n2(t.volume5dVs20d, 'x')),
+    `<div class="dz-note">${esc(t.trend)}</div>`,
+  ]);
+  const peers = col('Related assets (5d · 30d · correlation)', x.peers.length ? x.peers.map((p) => row(esc(p.name), `${n2(p.change5d, '%')} · ${n2(p.change30d, '%')} · ${n2(p.corr60d)}`)) : ['<div class="dz-note">none</div>']);
+  const macro = col('Macro', [
+    m.rates ? row('US 10y / 2y yield', `${m.rates.us10y}% / ${m.rates.us2y}%`) : '',
+    m.vix ? row('VIX (fear index)', n2(m.vix.level)) : '',
+    m.eurusd ? row('EUR/USD', m.eurusd.rate) : '',
+    m.sp500 ? row('S&P 500 30d', n2(m.sp500.change30d, '%')) : '',
+    m.nasdaq100 ? row('Nasdaq 100 30d', n2(m.nasdaq100.change30d, '%')) : '',
+    m.oil ? row('Oil 30d', n2(m.oil.change30d, '%')) : '',
+    m.cryptoFearGreed && b.sector === 'Crypto' ? row('Crypto Fear & Greed', `${m.cryptoFearGreed.value} (${esc(m.cryptoFearGreed.label)})`) : '',
+    row('Regime', esc(m.regime || '—')),
+  ]);
+  const fund = f
+    ? col('Fundamentals', [
+        row('P/E (TTM)', n2(f.peTTM)), row('PEG', n2(f.pegTTM)), row('Revenue growth', n2(f.revenueGrowthPct, '%')), row('EPS growth', n2(f.epsGrowthPct, '%')),
+        row('Net margin', n2(f.netMarginPct, '%')), row('Analyst target', f.analystTarget ? '$' + f.analystTarget : '—'),
+        row('Next earnings', f.nextEarnings ? esc(f.nextEarnings.date) : '—'),
+      ])
+    : col('Fundamentals', [`<div class="dz-note">${x.health?.fundamentals === 'no FMP_API_KEY' ? 'Not loaded — add a free FMP_API_KEY to enable.' : 'Not applicable to this asset.'}</div>`]);
+  return `<details class="panel dossier" style="margin-top:18px"><summary class="section-title" style="margin:0;cursor:pointer">📂 The dossier the council read</summary>
+    <div class="dz-grid">${tech}${peers}${macro}${fund}</div>
+    <details style="margin-top:12px"><summary class="track-sub" style="cursor:pointer">Show the exact text sent to Claude</summary><pre class="dz-raw">${esc(x.text)}</pre></details>
+  </details>`;
+}
+
 function renderCouncil(b) {
   const ev = b.evidence;
   const revealed = state.revealed[b.asset];
@@ -389,9 +442,9 @@ function renderCouncil(b) {
           <div><div class="an">${a.name}</div><div class="ar">${a.role}</div></div>
           <div class="stance ${t.stance}">${t.stance}</div>
         </div>
-        <div class="thesis">${t.thesis}</div>
-        <div class="meta-line"><b>Catalyst:</b> ${t.catalyst}</div>
-        <div class="meta-line"><b>Key risk:</b> ${t.keyRisk}</div>
+        <div class="thesis">${esc(t.thesis)}</div>
+        <div class="meta-line"><b>Catalyst:</b> ${esc(t.catalyst)}</div>
+        <div class="meta-line"><b>Key risk:</b> ${esc(t.keyRisk)}</div>
         <div class="conf-bar"><i style="width:${t.confidence}%;background:${a.color}"></i></div>
         <div class="meta-line" style="margin-top:6px">confidence <b>${t.confidence}%</b> · horizon ${t.horizonDays}d</div>
       </div>`;
@@ -403,21 +456,21 @@ function renderCouncil(b) {
   const moderator = `
     <div class="moderator">
       <div class="ag" style="color:${agColor}">⟁ Moderator · council ${mod.agreement}</div>
-      <div style="margin:8px 0;font-size:13.5px">${mod.summary}</div>
+      <div style="margin:8px 0;font-size:13.5px">${esc(mod.summary)}</div>
       <div class="bullbear">
-        <div><div class="lbl up">Bull case</div>${mod.bullCase}</div>
-        <div><div class="lbl down">Bear case</div>${mod.bearCase}</div>
+        <div><div class="lbl up">Bull case</div>${esc(mod.bullCase)}</div>
+        <div><div class="lbl down">Bear case</div>${esc(mod.bearCase)}</div>
       </div>
-      <div class="meta-line" style="margin-top:10px"><b>Open question:</b> ${mod.residualUncertainty}</div>
+      <div class="meta-line" style="margin-top:10px"><b>Open question:</b> ${esc(mod.residualUncertainty)}</div>
     </div>`;
 
   const news = b.news?.length
-    ? `<div class="panel" style="margin-top:18px"><div class="section-title">Scout's feed — headlines (references)</div>
-       <div class="news-list">${b.news.map((n) => `<a href="${n.link}" target="_blank" rel="noopener">↗ ${n.title}</a>`).join('')}</div></div>`
+    ? `<div class="panel" style="margin-top:18px"><div class="section-title">News about ${esc(b.name)} — what the council read (last 72h)</div>
+       <div class="news-list">${b.news.map((n) => `<a href="${safeUrl(n.link)}" target="_blank" rel="noopener noreferrer">↗ ${esc(n.title)}</a>`).join('')}</div></div>`
     : '';
 
   const councilBlock = revealed
-    ? `<div class="section-title">The Council · ${b.theses.length} analysts debating</div><div class="council-grid fade-in">${cards}</div>${moderator}${news}`
+    ? `${decisionPanel(b)}<div class="section-title">The Council · ${b.theses.length} analysts ${b.via === 'claude' ? '(Claude)' : '(built-in rules)'}</div><div class="council-grid fade-in">${cards}</div>${moderator}${dossierPanel(b)}${news}`
     : `<div class="section-title">The Council is waiting for your call…</div><div style="filter:blur(7px);opacity:0.5;pointer-events:none"><div class="council-grid">${cards}</div></div>`;
 
   $('#council-body').innerHTML = head + yvc + councilBlock + disclaimer();
@@ -656,7 +709,7 @@ function holdingsPanel(f) {
   </div>`;
 }
 
-const ICON = { trade: '⇄', decision: '💭', offline: '⚠', error: '✕', flip: '↻', daily: '📅', result: '🏁', challenge: '▶', graded: '⚖' };
+const ICON = { pm: '🧭', data: '📡', trade: '⇄', decision: '💭', offline: '⚠', error: '✕', flip: '↻', daily: '📅', result: '🏁', challenge: '▶', graded: '⚖' };
 
 function thesisList(theses) {
   return (theses || []).map((t) => `<div class="th"><span class="stance ${t.stance}">${t.stance}</span> <b>${esc(t.agent)}</b> <span class="numeric" style="color:var(--dim)">${t.confidence}%</span> — ${esc(t.thesis)}</div>`).join('');
@@ -678,7 +731,7 @@ function cycleCard(c) {
   const end = c.events.find((e) => e.type === 'cycle_end');
   const start = c.events.find((e) => e.type === 'cycle');
   const trades = c.events.filter((e) => e.type === 'trade');
-  const notes = c.events.filter((e) => ['decision', 'error', 'flip', 'graded'].includes(e.type));
+  const notes = c.events.filter((e) => ['pm', 'decision', 'error', 'flip', 'graded', 'data'].includes(e.type));
   const analyses = c.events.filter((e) => e.type === 'analysis');
   const key = 'c' + c.id;
   return `<div class="cycle ${trades.length ? 'has-trades' : ''}">

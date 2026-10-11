@@ -1,5 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { installPoliteFetch } from './net.js';
+
+installPoliteFetch();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -42,6 +45,26 @@ export const CONFIG = {
   // Stock data provider key (Twelve Data free tier works from cloud hosts).
   // Without it, the app falls back to Yahoo (fine locally, blocked on cloud).
   stockApiKey: process.env.STOCK_API_KEY || process.env.TWELVEDATA_API_KEY || '',
+
+  // Company fundamentals (P/E, growth, earnings date, analyst targets) — free
+  // key from financialmodelingprep.com. Without it, fundamentals are skipped.
+  fmpApiKey: process.env.FMP_API_KEY || '',
+
+  // Reference-only instruments: fetched for context (peers, macro), never traded.
+  references: [
+    { id: 'QQQ', name: 'Nasdaq 100 ETF', kind: 'stock', sector: 'Broad Market' },
+    { id: 'SOXX', name: 'Semiconductor ETF', kind: 'stock', sector: 'Semiconductors' },
+    { id: 'COIN', name: 'Coinbase', kind: 'stock', sector: 'Crypto equities' },
+    { id: 'USO', name: 'Oil ETF', kind: 'stock', sector: 'Commodities' },
+  ],
+
+  // Each asset's "family": what the bot compares it with.
+  peers: {
+    BTC: ['ETH', 'COIN', 'QQQ'], ETH: ['BTC', 'SOL', 'COIN'], SOL: ['ETH', 'BTC'], BNB: ['BTC', 'ETH'],
+    XRP: ['BTC', 'ADA'], DOGE: ['BTC', 'ETH'], ADA: ['XRP', 'ETH'],
+    NVDA: ['SOXX', 'MSFT', 'QQQ'], AAPL: ['MSFT', 'QQQ'], MSFT: ['AAPL', 'NVDA', 'QQQ'], TSLA: ['QQQ', 'NVDA'],
+    SPY: ['QQQ', 'GLD'], GLD: ['SPY', 'USO'],
+  },
 
   horizonDays: 3,
   bullBand: 0.5,
@@ -94,5 +117,5 @@ export const CONFIG = {
 };
 
 export function assetById(id) {
-  return CONFIG.universe.find((a) => a.id === id);
+  return CONFIG.universe.find((a) => a.id === id) || CONFIG.references.find((a) => a.id === id);
 }

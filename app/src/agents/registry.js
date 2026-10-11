@@ -8,4 +8,7 @@ export const AGENTS = {
   ALCHEMIST: { id: 'ALCHEMIST', name: 'Alchemist', role: 'Portfolio Optimizer', color: '#f0abfc', glyph: '✶', blurb: 'Turns the debate into balance: diversification and fit.' },
 };
 
+// The council's final BUY/SELL/HOLD decision, graded in the ledger like an analyst.
+AGENTS.BOT = { id: 'BOT', name: 'Council decision', role: 'BUY / SELL / HOLD', color: '#7c5cff', glyph: '⚖', blurb: 'The chair weighs the six analysts and decides.' };
+
 export const COUNCIL_ORDER = ['SAGE', 'ORACLE', 'SCOUT', 'SENTINEL', 'ATLAS', 'ALCHEMIST'];

@@ -8,6 +8,7 @@ import { gradeDue } from '../ledger/grade.js';
 import { getSpot, getEurUsd, usMarketOpen } from '../data/market.js';
 import { loadFund, saveFund, snapshot, valuation, benchmarks, startChallenge } from '../fund/portfolio.js';
 import { decide } from '../fund/trader.js';
+import { runPortfolioManager } from '../agents/pm.js';
 import { logEvent, getEvents } from './activity.js';
 
 const EVERY_MS = Math.max(5, CONFIG.signals.everyMin) * 60000;
@@ -16,6 +17,18 @@ const state = { phase: 'idle', progress: null, lastRunAt: null, nextRunAt: null,
 
 const eur = (n) => '€' + n.toFixed(2);
 const pct = (n) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+
+// One line per cycle saying which data the analysis actually had.
+function dataHealthText(signals) {
+  const ok = signals.filter((s) => s.health);
+  const n = ok.length;
+  const count = (f) => ok.filter(f).length;
+  const m = ok[0]?.health.macro || {};
+  const macroOk = Object.values(m).filter((v) => v === 'ok').length;
+  const fundStatus = [...new Set(ok.map((s) => s.health.fundamentals).filter((v) => v !== 'n/a'))].join(', ') || 'n/a';
+  const missing = Object.entries(m).filter(([, v]) => v !== 'ok').map(([k, v]) => `${k}: ${v}`);
+  return `Data this cycle: news ${count((s) => s.health.news === 'ok')}/${n} assets · related assets ${count((s) => { const [a, b] = String(s.health.peers).split('/'); return a === b; })}/${n} complete · macro ${macroOk}/${Object.keys(m).length} sources${missing.length ? ` (${missing.join('; ')})` : ''} · fundamentals: ${fundStatus} · ${count((s) => s.via === 'claude')}/${n} decided by Claude.`;
+}
 
 export function status() {
   const now = Date.now();
@@ -87,9 +100,10 @@ export async function runCycle({ reason = 'scheduled' } = {}) {
       if (s.error) { logEvent('error', `${s.asset}: could not analyse — ${s.error}`, { cycle, asset: s.asset }); continue; }
       const ai = s.theses.filter((t) => t.via === 'claude').length;
       logEvent('analysis', `${s.asset}: ${s.votes.bull}↑ ${s.votes.bear}↓ → ${s.action} (strength ${s.strength}) · ${ai ? `${ai}/${s.theses.length} by Claude` : 'rules only'}`, {
-        cycle, asset: s.asset, action: s.action, score: s.score, strength: s.strength, price: s.price, votes: s.votes, reason: s.reason, risk: s.risk, theses: s.theses,
+        cycle, asset: s.asset, action: s.action, score: s.score, strength: s.strength, price: s.price, votes: s.votes, reason: s.reason, risk: s.risk, theses: s.theses, decision: s.decision, via: s.via,
       });
     }
+    logEvent('data', dataHealthText(signals), { cycle });
     const u = llmUsage();
     if (u.enabled && u.failed && !u.ok) logEvent('error', `Claude is NOT being used: every call failed (${u.lastError}). The analysts used their built-in rules this cycle.`, { cycle });
     const counts = ['BUY', 'SELL', 'HOLD'].map((a) => `${signals.filter((s) => s.action === a).length} ${a}`).join(' · ');
@@ -103,7 +117,18 @@ export async function runCycle({ reason = 'scheduled' } = {}) {
       if (!fx) throw new Error('no EUR/USD rate — skipped trading this cycle');
       const prices = await livePrices([...new Set([...signals.map((s) => s.asset), ...Object.keys(fund.positions)])]);
       const marketOpen = usMarketOpen();
-      const { trades, notes } = decide(fund, signals, { prices, fx, marketOpen });
+      // Portfolio manager: may veto trades for portfolio reasons (Claude only).
+      let finalSignals = signals;
+      if (signals.some((s) => s.via === 'claude')) {
+        state.progress = { i: signals.length, n: signals.length, asset: null, step: 'portfolio review' };
+        const pm = await runPortfolioManager({ fund: valuation(fund, prices, fx), signals: signals.filter((s) => !s.error) });
+        if (pm) {
+          const veto = Object.fromEntries(pm.vetoes.map((v) => [v.asset, v.reason]));
+          finalSignals = signals.map((s) => (veto[s.asset] ? { ...s, action: 'HOLD', vetoed: veto[s.asset], vetoedAction: s.action } : s));
+          logEvent('pm', `Portfolio manager: ${pm.summary || 'reviewed the trades.'}${pm.vetoes.length ? ` Vetoed: ${pm.vetoes.map((v) => `${v.asset} (${v.reason})`).join('; ')}.` : ' No vetoes.'}`, { cycle, vetoes: pm.vetoes });
+        }
+      }
+      const { trades, notes } = decide(fund, finalSignals, { prices, fx, marketOpen });
       for (const t of trades) {
         const extra = t.side === 'SELL' ? ` — ${t.realized >= 0 ? 'profit' : 'loss'} ${eur(Math.abs(t.realized))} (${pct(t.realizedPct)})` : '';
         logEvent('trade', `${t.side} ${t.asset}: ${eur(t.value)} at $${+t.priceUsd.toFixed(4)}${extra}`, { cycle, trade: t });

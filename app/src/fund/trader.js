@@ -54,11 +54,12 @@ export function decide(fund, signals, { prices, fx, marketOpen }) {
     if (t) trades.push(t);
   }
 
+  for (const s of signals.filter((x) => x.vetoed)) notes.push(`${s.asset}: ${s.vetoedAction} vetoed by the portfolio manager — ${s.vetoed}`);
   if (!trades.length && !notes.length) {
     const best = signals.filter((s) => !s.error).sort((x, y) => y.score - x.score)[0];
     const worstHeld = Object.keys(fund.positions).map((a) => by[a]).filter(Boolean).sort((x, y) => x.score - y.score)[0];
-    let n = 'No trade: nothing reached a BUY signal';
-    if (best) n += ` — the most bullish was ${best.asset} at strength ${best.strength} (needs ${Math.round(S.buyThreshold * 100)})`;
+    let n = 'No trade: no asset got a BUY decision';
+    if (best) n += ` — the most bullish was ${best.asset} (${best.action}, strength ${best.strength}${best.via === 'claude' ? '' : `, rules need ${Math.round(S.buyThreshold * 100)}`})`;
     if (worstHeld) n += `; holdings stay — weakest is ${worstHeld.asset} (${worstHeld.action}), no SELL signal or stop-loss hit`;
     notes.push(n + '.');
   }

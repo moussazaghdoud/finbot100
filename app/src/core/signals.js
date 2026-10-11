@@ -21,9 +21,13 @@ export function actionFor(score) {
   return 'HOLD';
 }
 
+// With Claude, the council chair's decision is the signal (strength = its
+// conviction); with the rules, the confidence-weighted analyst score is.
 function toSignal(brief) {
-  const score = signalFromBrief(brief);
-  const action = actionFor(score);
+  const d = brief.decision;
+  const vote = signalFromBrief(brief);
+  const action = d ? d.action : actionFor(vote);
+  const score = d ? (action === 'BUY' ? 1 : action === 'SELL' ? -1 : 0) * (d.conviction / 100) || vote / 10 : vote;
   const { b, r } = brief.moderator.tally;
   const m = brief.moderator;
   return {
@@ -35,10 +39,13 @@ function toSignal(brief) {
     ret30d: brief.evidence.ret30d,
     action,
     score,
-    strength: Math.round(Math.abs(score) * 100),
+    strength: d ? d.conviction : Math.round(Math.abs(score) * 100),
+    via: brief.via,
+    decision: d,
+    health: brief.dossier?.health,
     votes: { bull: b, bear: r, neutral: brief.theses.length - b - r },
-    reason: action === 'SELL' ? m.bearCase : action === 'BUY' ? m.bullCase : m.summary,
-    risk: action === 'SELL' ? m.bullCase : m.bearCase,
+    reason: d ? d.reasoning : action === 'SELL' ? m.bearCase : action === 'BUY' ? m.bullCase : m.summary,
+    risk: d ? d.risks : action === 'SELL' ? m.bullCase : m.bearCase,
     theses: brief.theses.map((t) => ({ agent: t.agent, stance: t.stance, confidence: t.confidence, thesis: t.thesis, via: t.via })),
     ts: brief.ts,
   };
@@ -61,6 +68,14 @@ export async function getSignals({ onProgress } = {}) {
     }
   };
   await Promise.all(Array.from({ length: 3 }, worker));
+  // One more try for assets that failed (usually a passing network blip).
+  for (const failed of out.filter((s) => s.error)) {
+    try {
+      Object.assign(failed, toSignal(await runDebate(failed.asset)), { error: undefined });
+    } catch (e) {
+      failed.error = e.message + (e.cause?.code ? ` (${e.cause.code})` : '');
+    }
+  }
   await detectFlips(out.filter((s) => !s.error));
   const rank = { BUY: 0, SELL: 1, HOLD: 2 };
   return out.sort((x, y) => (rank[x.action] ?? 3) - (rank[y.action] ?? 3) || (y.strength || 0) - (x.strength || 0));
@@ -90,8 +105,11 @@ export function trackRecord() {
     if (g.length < 4) continue; // incomplete council
     if (!g.every((p) => p.resolved)) { pending++; continue; }
     if (g.some((p) => p.void)) continue; // no price on the resolve day
-    const score = signalFromBrief({ theses: g });
-    const action = actionFor(score);
+    // The council's own decision (agent BOT) when Claude made it; else the analyst vote.
+    const bot = g.find((p) => p.agent === 'BOT');
+    const analysts = g.filter((p) => p.agent !== 'BOT');
+    const score = bot ? (bot.stance === 'bullish' ? 1 : bot.stance === 'bearish' ? -1 : 0) * (bot.confidence / 100) : signalFromBrief({ theses: analysts });
+    const action = bot ? (bot.stance === 'bullish' ? 'BUY' : bot.stance === 'bearish' ? 'SELL' : 'HOLD') : actionFor(score);
     const ret = g[0].actualReturn;
     graded.push({ asset: g[0].asset, action, score, ret, correct: judge(action, ret), seeded: g.every((p) => p.seeded), createdAt: g[0].createdAt, priceAtCall: g[0].priceAtCall, priceAtResolve: g[0].priceAtResolve });
   }
