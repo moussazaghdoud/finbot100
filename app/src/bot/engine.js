@@ -64,8 +64,7 @@ async function finalize(fund) {
   fund.status = 'ended';
   fund.final = { t: Date.now(), value: v.total, pnl: v.pnl, pnlPct: v.pnlPct, benchmarks: bm, holdings: v.holdings };
   saveFund(fund);
-  const best = [...bm].sort((a, b) => b.value - a.value)[0];
-  logEvent('result', `Challenge over: ${eur(fund.base)} → ${eur(v.total)} (${pct(v.pnlPct)}).` + (best ? ` Best benchmark: ${best.label} ${eur(best.value)} (${pct(best.pnlPct)}).` : ''), { value: v.total, pnlPct: v.pnlPct, benchmarks: bm });
+  logEvent('result', `Challenge over: ${eur(fund.base)} → ${eur(v.total)} (${pct(v.pnlPct)}) after ${fund.trades.length} trades.`, { value: v.total, pnlPct: v.pnlPct });
 }
 
 export async function beginChallenge() {

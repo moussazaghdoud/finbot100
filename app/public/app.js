@@ -650,7 +650,7 @@ function challengeHero(f) {
         <li>Every ${state.config.signalsEveryMin} min it analyses all ${state.config.universe.length} assets and acts on the <b>BUY / SELL</b> signals.</li>
         <li>Buys ~12% of the fund per signal, max 22% in one asset. Sells on a SELL signal or a <b>-${f.stopLossPct}% stop-loss</b>.</li>
         <li>Real live prices. Crypto trades 24/7; US stocks only while the market is open. € converted at the live EUR/USD rate, 0.1% fee per trade.</li>
-        <li>Every decision — including "do nothing" — is written in the journal with its reasons. At the end you see the result against simple alternatives.</li>
+        <li>Every decision — including "do nothing" — is written in the journal with its reasons.</li>
       </ul>
       <button class="btn" id="start-ch">▶ Start the ${eur(f.base)} challenge</button>
       <div class="fh-note" style="margin-top:8px">The server must keep running for all ${f.durationDays} days (Railway, or leave this PC on). Gaps are shown in the journal.</div>
@@ -677,16 +677,6 @@ function challengeHero(f) {
       <div class="fh-note">${f.marketOpen ? 'US market open' : 'US market closed — stocks wait, crypto trades'}</div>
     </div>
   </div>`;
-}
-
-function benchPanel(f) {
-  if (f.status === 'idle' || !f.benchmarks?.length) return '';
-  const cards = [{ id: 'bot', label: 'The bot', value: f.total, pnlPct: f.pnlPct }, ...f.benchmarks].map((b) => {
-    const beat = b.id === 'bot' ? '' : f.total >= b.value ? `<span class="up">bot ahead by ${eur(f.total - b.value)}</span>` : `<span class="down">bot behind by ${eur(b.value - f.total)}</span>`;
-    return `<div class="bench ${b.id === 'bot' ? 'me' : ''}"><div class="track-sub">${esc(b.label)}</div>
-      <div class="bench-v numeric">${eur(b.value)}</div><div class="numeric ${cls(b.pnlPct)}" style="font-size:12px">${pctS(b.pnlPct)}</div><div style="font-size:11px;margin-top:4px">${beat}</div></div>`;
-  }).join('');
-  return `<div class="panel fade-in" style="margin-top:16px"><div class="section-title">Is the bot worth it? — same ${eur(f.base)}, same dates</div><div class="bench-grid">${cards}</div></div>`;
 }
 
 function holdingsPanel(f) {
@@ -769,7 +759,7 @@ function renderBot() {
   const f = bot.view;
   if (!f) return;
   const scroll = $('#fund').scrollTop;
-  $('#fund-body').innerHTML = `<div id="bot-status"></div>` + challengeHero(f) + benchPanel(f) + holdingsPanel(f) + journal() + fundNote();
+  $('#fund-body').innerHTML = `<div id="bot-status"></div>` + challengeHero(f) + holdingsPanel(f) + journal() + fundNote();
   renderBotStatus();
   $('#fund').scrollTop = scroll;
   document.querySelectorAll('#fund-body details[data-key]').forEach((d) => d.addEventListener('toggle', () => (d.open ? bot.open.add(d.dataset.key) : bot.open.delete(d.dataset.key))));
