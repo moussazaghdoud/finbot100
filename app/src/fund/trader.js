@@ -8,6 +8,9 @@ const S = CONFIG.signals;
 
 const votes = (s) => `${s.votes.bull}↑ ${s.votes.bear}↓ ${s.votes.neutral}–`;
 const isStock = (a) => assetById(a)?.kind === 'stock';
+// Claude's decisions must clear the conviction bar; rule-based signals already
+// passed their own thresholds.
+const confident = (s) => s.via !== 'claude' || s.strength >= S.minConviction;
 
 // signals: output of getSignals(); ctx: { prices: {asset: usd}, fx, marketOpen }
 // Returns { trades, notes } — notes are plain-language reasons for non-trades.
@@ -24,7 +27,9 @@ export function decide(fund, signals, { prices, fx, marketOpen }) {
     if (!p) { notes.push(`${a}: no live price, can't act on it this round.`); continue; }
     const pnlPct = ((p / fx - pos.avgCostEur) / pos.avgCostEur) * 100;
     let why = null;
-    if (s?.action === 'SELL') {
+    if (s?.action === 'SELL' && !confident(s)) {
+      notes.push(`${a}: SELL signal, but conviction ${s.strength}/100 is below ${S.minConviction} — keeping it.`);
+    } else if (s?.action === 'SELL') {
       why = { rule: 'signal', headline: `Sell signal (${votes(s)}, strength ${s.strength})`, reason: s.reason, risk: s.risk, score: s.score, theses: s.theses };
     } else if (pnlPct <= -F.stopLossPct) {
       why = { rule: 'stop-loss', headline: `Stop-loss: down ${Math.abs(pnlPct).toFixed(1)}% from cost`, reason: `Holding fell past the -${F.stopLossPct}% stop-loss, so the bot cuts the loss instead of hoping for a rebound.`, risk: s ? `Analysts now: ${votes(s)} (${s.action}).` : '', score: s?.score ?? null };
@@ -39,6 +44,7 @@ export function decide(fund, signals, { prices, fx, marketOpen }) {
   const candidates = signals.filter((s) => !s.error && s.action === 'BUY').sort((x, y) => y.score - x.score);
   for (const s of candidates) {
     const a = s.asset;
+    if (!confident(s)) { notes.push(`${a}: BUY signal, but conviction ${s.strength}/100 is below ${S.minConviction} — not confident enough to buy.`); continue; }
     if (closed(a)) { notes.push(`${a}: buy signal, but the US market is closed — will reconsider when it opens.`); continue; }
     if (!prices[a]) { notes.push(`${a}: buy signal, but no live price right now.`); continue; }
     const v = valuation(fund, prices, fx);

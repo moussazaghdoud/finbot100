@@ -83,6 +83,8 @@ export const CONFIG = {
 
   // BUY / SELL / HOLD thresholds on the Council signal (-1..+1).
   signals: {
+    // Claude decisions only become trades at this conviction (0-100) or higher.
+    minConviction: Number(process.env.MIN_CONVICTION || 65),
     buyThreshold: 0.14,
     sellThreshold: 0.14,
     everyMin: Number(process.env.SIGNALS_EVERY_MIN || 60), // background re-check for flips
