@@ -19,7 +19,6 @@ async function boot() {
   setupNav();
   if (state.config.authEnabled) $('#logout').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.replace('/login.html'); };
   else $('#logout').remove();
-  refreshCapital();
   startAlertWatch();
   refreshPill();
   setInterval(refreshPill, 15000);
@@ -160,10 +159,6 @@ function startAlertWatch() {
   }, 60000);
 }
 
-async function refreshCapital() {
-  const me = await api('/api/me');
-  $('#capital').textContent = '€' + me.capital;
-}
 
 // ── UNIVERSE MAP ──────────────────────────────────────
 let cam = { x: 0, y: 0, scale: 1 };
@@ -499,7 +494,6 @@ function wireYvc(b) {
       body: JSON.stringify({ asset: b.asset, stance, confidence: +conf.value }),
     });
     state.revealed[b.asset] = true;
-    refreshCapital();
     renderCouncil(b);
   });
   $('#skip-call').addEventListener('click', () => { state.revealed[b.asset] = true; renderCouncil(b); });
