@@ -112,6 +112,9 @@ export const CONFIG = {
   // Hard ceiling on Claude calls per UTC day (7 per asset debate). Past it the
   // analysts fall back to their data-driven rules until midnight UTC.
   maxClaudeCallsPerDay: Number(process.env.MAX_CLAUDE_CALLS_PER_DAY || 2500),
+  // How much Claude reasons before deciding: low | medium | high. Medium weighs
+  // the dossier properly at a modest cost increase.
+  claudeEffort: process.env.CLAUDE_EFFORT || 'medium',
 
   // Reuse a debate this long (minutes). Matches the bot cycle so page views
   // between cycles don't trigger (and pay for) extra debates.

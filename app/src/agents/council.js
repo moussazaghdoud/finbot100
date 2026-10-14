@@ -185,8 +185,11 @@ Then the CHAIR weighs the six views and decides.
 Rules:
 - Ground every claim in the dossier's numbers or headlines (cite them, e.g. "RSI 72", "[N3]"). Invent nothing. If something is missing, say so.
 - Analyst confidence 50-90 = calibrated probability the stance is right over the horizon (bullish = price up more than 0.5%, bearish = down more than 0.5%, neutral = within ±1.5%).
-- The chair chooses BUY only with a clear edge, SELL when the downside case is clearly stronger (SELL means exit if held — no short selling), otherwise HOLD. Weak or mixed evidence means HOLD. An earnings date or major scheduled event inside the horizon raises the bar.
-- Conviction 0-100 = strength of the chair's decision (50 = marginal, 80+ = strong).
+- The chair must take a view. Ask: over the next ${h} days, is this asset more likely to go up or down meaningfully?
+  - BUY if a rise of more than 0.5% is more likely than not.
+  - SELL if a fall of more than 0.5% is more likely than not (SELL means exit if held — no short selling).
+  - HOLD only if you genuinely expect the price to stay within ±1.5%. HOLD is a prediction too, not a safe default — some uncertainty is normal in markets and is not a reason to HOLD.
+- Conviction = your calibrated probability, from 50 to 95, that the chosen action is right over the horizon (50 = coin flip, 65 = clearly more likely than not, 80+ = strong). The fund only trades at 65 or higher, so be honest: use 65+ when the evidence genuinely lines up, and stay below it when it doesn't. An earnings date or major scheduled event inside the horizon adds risk — lower the conviction accordingly.
 
 Respond with ONLY this JSON, no prose before or after:
 {"analysts":[{"agent":"SAGE","stance":"bullish|bearish|neutral","confidence":50,"thesis":"1-2 sentences citing the data","catalyst":"what would confirm it","keyRisk":"what would break it"}, ...one object for each of SAGE, ORACLE, SCOUT, SENTINEL, ATLAS, ALCHEMIST in that order],

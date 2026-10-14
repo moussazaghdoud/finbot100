@@ -82,8 +82,8 @@ function extractJson(t) {
   }
 }
 
-// One short JSON answer. Low effort keeps the model's reasoning (billed as
-// output) small; max_tokens leaves room for that reasoning plus the JSON.
+// One JSON answer. Effort (CONFIG.claudeEffort) sets how much the model reasons
+// first (billed as output); max_tokens leaves room for that plus the JSON.
 // Structured outputs make the API guarantee schema-valid JSON. If the API ever
 // rejects a schema, that request is retried once without it and schemas are
 // switched off for the rest of the process (prompt-only JSON, parsed leniently).
@@ -104,8 +104,8 @@ export async function askClaudeJson(system, user, schema = null) {
   const create = (withSchema) =>
     client.messages.create({
       model: CONFIG.model,
-      max_tokens: 4000,
-      output_config: withSchema ? { effort: 'low', format: { type: 'json_schema', schema } } : { effort: 'low' },
+      max_tokens: 8000,
+      output_config: withSchema ? { effort: CONFIG.claudeEffort, format: { type: 'json_schema', schema } } : { effort: CONFIG.claudeEffort },
       system,
       messages: [{ role: 'user', content: user }],
     });
