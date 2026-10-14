@@ -13,7 +13,7 @@ import { logEvent, getEvents } from './activity.js';
 
 const EVERY_MS = Math.max(5, CONFIG.signals.everyMin) * 60000;
 const bootAt = Date.now();
-const state = { phase: 'idle', progress: null, lastRunAt: null, nextRunAt: null, lastError: null, lastPaidCycleUsd: null };
+const state = { phase: 'idle', progress: null, lastRunAt: null, nextRunAt: null, lastError: null, cycleCosts: [] };
 
 const eur = (n) => '€' + n.toFixed(2);
 const pct = (n) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
@@ -43,7 +43,9 @@ export function status() {
     nextRunAt: state.nextRunAt,
     everyMin: CONFIG.signals.everyMin,
     engine: llmMode(),
-    claude: { ...llmUsage(), perDayUsd: state.lastPaidCycleUsd == null ? null : +(state.lastPaidCycleUsd * (1440 / CONFIG.signals.everyMin)).toFixed(2) },
+    // Pace = average cost of the last (up to) 24 cycles × cycles per day. Cycles that
+    // reuse cached analyses really cost ~0, so the average reflects the true rate.
+    claude: { ...llmUsage(), perDayUsd: state.cycleCosts.length < 2 ? null : +((state.cycleCosts.reduce((a, b) => a + b, 0) / state.cycleCosts.length) * (1440 / CONFIG.signals.everyMin)).toFixed(2) },
     uptimeSec: Math.round((now - bootAt) / 1000),
     lastError: state.lastError,
     now,
@@ -157,7 +159,7 @@ export async function runCycle({ reason = 'scheduled' } = {}) {
     return { error: e.message };
   } finally {
     const cycleUsd = llmUsage().totalUsd - usdBefore;
-    if (cycleUsd > 0) state.lastPaidCycleUsd = cycleUsd; // cached cycles cost 0 — keep the last real one
+    state.cycleCosts = [...state.cycleCosts, Math.max(0, cycleUsd)].slice(-24);
     state.phase = 'idle';
     state.progress = null;
     state.lastRunAt = Date.now();
